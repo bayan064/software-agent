@@ -9,7 +9,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 导入 Mock 工具函数（等室友A写完真实版本后，改这行就行）
-from tools.mock_tools import save_code, run_pytest
+from tools.real_tools import save_code, run_pytest
 
 # 导入 LLM 客户端（用于生成代码和修复）
 from agent.llm_client import generate_code, generate_test, fix_code
@@ -36,7 +36,6 @@ def generate_code_node(state: AgentState) -> dict:
     
     requirement = state.get("requirement", "")
     if not requirement:
-        # 如果状态里没有需求，尝试从 messages 里取
         for msg in state.get("messages", []):
             if msg.startswith("需求:"):
                 requirement = msg.replace("需求:", "").strip()
@@ -44,19 +43,23 @@ def generate_code_node(state: AgentState) -> dict:
     
     print(f"📝 需求: {requirement[:100]}...")
     
-    # 调用 LLM 生成代码
     code = generate_code(requirement)
     print(f"✅ 代码生成完成，长度: {len(code)} 字符")
     
-    # 保存代码到文件（使用接口函数）
-    filepath = "output/solution.py"
+    # 确保 output 目录存在
     os.makedirs("output", exist_ok=True)
-    save_code(code, filepath)
     
-    # 生成测试代码
-    test_code = generate_test(code)
+    # 保存实现代码
+    impl_filepath = "output/solution.py"
+    save_code(code, impl_filepath)
+    
+    # 生成并保存测试代码
+    test_code = generate_test(code)  # 现在会自动提取函数名
     test_filepath = "output/test_solution.py"
     save_code(test_code, test_filepath)
+    
+    print(f"📁 代码已保存到: {impl_filepath}")
+    print(f"📁 测试已保存到: {test_filepath}")
     
     return {
         "code": code,
@@ -64,7 +67,6 @@ def generate_code_node(state: AgentState) -> dict:
         "messages": ["代码已生成并保存"],
         "steps": state.get("steps", 0) + 1
     }
-
 
 def run_tests_node(state: AgentState) -> dict:
     """运行测试节点：执行pytest并收集结果"""
