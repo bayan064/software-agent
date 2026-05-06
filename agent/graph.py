@@ -8,8 +8,9 @@ import os
 # 添加项目根目录到路径，方便导入模块
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# 导入 Mock 工具函数（等室友A写完真实版本后，改这行就行）
-from tools.real_tools import save_code, run_pytest
+# 导入工具函数
+from tools.file_tools import save_code
+from tools.executor import run_pytest
 
 # 导入 LLM 客户端（用于生成代码和修复）
 from agent.llm_client import generate_code, generate_test, fix_code
@@ -100,8 +101,8 @@ def fix_code_node(state: AgentState) -> dict:
     # 调用 LLM 修复代码
     fixed_code = fix_code(code, error_log)
     
-    # 保存修复后的代码
-    filepath = "output/solution_fixed.py"
+    # 保存修复后的代码（覆盖被测试的实现）
+    filepath = "output/solution.py"
     os.makedirs("output", exist_ok=True)
     save_code(fixed_code, filepath)
     
