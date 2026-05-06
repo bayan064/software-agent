@@ -9,13 +9,15 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+     "onCommand:agent-ui.generateCode"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "agent-ui.helloWorld",
-        "title": "Hello World"
+        "command": "agent-ui.generateCode",
+        "title": "生成代码"
       }
     ]
   },
