@@ -35,25 +35,65 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
 exports.deactivate = deactivate;
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
+// extension.ts
 const vscode = __importStar(require("vscode"));
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
 function activate(context) {
-    // Use the console to output diagnostic information (console.log) and errors (console.error)
-    // This line of code will only be executed once when your extension is activated
-    console.log('Congratulations, your extension "agent-ui" is now active!');
-    // The command has been defined in the package.json file
-    // Now provide the implementation of the command with registerCommand
-    // The commandId parameter must match the command field in package.json
-    const disposable = vscode.commands.registerCommand('agent-ui.helloWorld', () => {
-        // The code you place here will be executed every time your command is executed
-        // Display a message box to the user
-        vscode.window.showInformationMessage('Hello World from agent-ui!');
+    console.log('插件 "agent-ui" 已激活');
+    // 注册一个命令：点击按钮时调用智能体
+    const generateCommand = vscode.commands.registerCommand('agent-ui.generateCode', async () => {
+        // 1. 让用户输入需求
+        const requirement = await vscode.window.showInputBox({
+            prompt: '请输入你的需求',
+            placeHolder: '例如：写一个加法函数，输入两个数字返回它们的和',
+            title: '智能体需求输入'
+        });
+        if (!requirement) {
+            vscode.window.showWarningMessage('未输入需求');
+            return;
+        }
+        vscode.window.showInformationMessage('正在生成代码，请稍候...');
+        try {
+            // 2. 调用你的后端API
+            const response = await fetch('http://10.39.80.54:8000/generate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ requirement })
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status} ${response.statusText}`);
+            }
+            const data = (await response.json());
+            const code = data.code;
+            const testCode = data.test_code;
+            const testResult = data.test_result;
+            // 3. 创建一个新文件显示生成的代码
+            const doc = await vscode.workspace.openTextDocument({
+                content: code,
+                language: 'python'
+            });
+            await vscode.window.showTextDocument(doc);
+            // 4. 显示测试结果
+            if (testResult) {
+                if (testResult.failed === 0) {
+                    vscode.window.showInformationMessage(`✅ 测试通过！共 ${testResult.passed} 个测试用例全部通过`);
+                }
+                else {
+                    vscode.window.showWarningMessage(`❌ 测试失败：${testResult.failed} 个失败`);
+                }
+            }
+            else {
+                vscode.window.showInformationMessage('生成完成，但未返回测试结果');
+            }
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`调用智能体失败：${message}`);
+            console.error(error);
+        }
     });
-    context.subscriptions.push(disposable);
+    context.subscriptions.push(generateCommand);
 }
-// This method is called when your extension is deactivated
 function deactivate() { }
 //# sourceMappingURL=extension.js.map

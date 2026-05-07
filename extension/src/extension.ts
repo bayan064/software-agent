@@ -1,6 +1,13 @@
 // extension.ts
 import * as vscode from 'vscode';
-import * as axios from 'axios';
+type GenerateResponse = {
+    code: string;
+    test_code: string;
+    test_result?: {
+        passed: number;
+        failed: number;
+    };
+};
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('插件 "agent-ui" 已激活');
@@ -23,13 +30,22 @@ export function activate(context: vscode.ExtensionContext) {
 
         try {
             // 2. 调用你的后端API
-            const response = await axios.default.post('http://127.0.0.1:8000/generate', {
-                requirement: requirement
+            const response = await fetch('http://127.0.0.1:8000/generate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ requirement })
             });
 
-            const code = response.data.code;
-            const testCode = response.data.test_code;
-            const testResult = response.data.test_result;
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status} ${response.statusText}`);
+            }
+
+            const data = (await response.json()) as GenerateResponse;
+            const code = data.code;
+            const testCode = data.test_code;
+            const testResult = data.test_result;
 
             // 3. 创建一个新文件显示生成的代码
             const doc = await vscode.workspace.openTextDocument({
@@ -39,14 +55,19 @@ export function activate(context: vscode.ExtensionContext) {
             await vscode.window.showTextDocument(doc);
 
             // 4. 显示测试结果
-            if (testResult.failed === 0) {
-                vscode.window.showInformationMessage(`✅ 测试通过！共 ${testResult.passed} 个测试用例全部通过`);
+            if (testResult) {
+                if (testResult.failed === 0) {
+                    vscode.window.showInformationMessage(`✅ 测试通过！共 ${testResult.passed} 个测试用例全部通过`);
+                } else {
+                    vscode.window.showWarningMessage(`❌ 测试失败：${testResult.failed} 个失败`);
+                }
             } else {
-                vscode.window.showWarningMessage(`❌ 测试失败：${testResult.failed} 个失败`);
+                vscode.window.showInformationMessage('生成完成，但未返回测试结果');
             }
 
         } catch (error) {
-            vscode.window.showErrorMessage(`调用智能体失败：${error}`);
+            const message = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`调用智能体失败：${message}`);
             console.error(error);
         }
     });
@@ -54,4 +75,4 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(generateCommand);
 }
 
-export function deactivate() {}
+export function deactivate() { }
