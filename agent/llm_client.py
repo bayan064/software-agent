@@ -21,12 +21,14 @@ def _extract_function_name(code: str) -> str:
 
 def _clean_code(raw: str) -> str:
     """移除markdown代码块标记"""
+    if not raw:
+        return ""
     lines = raw.split('\n')
     if lines and lines[0].strip().startswith('```'):
         lines = lines[1:]
     if lines and lines[-1].strip() == '```':
         lines = lines[:-1]
-    return '\n'.join(lines)
+    return '\n'.join(lines).strip()
 
 
 def generate_code(requirement: str) -> str:
@@ -47,19 +49,85 @@ def generate_code(requirement: str) -> str:
     return _clean_code(response.choices[0].message.content)
 
 
+def generate_code_and_test(requirement: str) -> tuple:
+    """同时生成代码和测试用例，确保一致性"""
+    
+    prompt = f"""请根据以下需求，同时生成Python代码和对应的pytest测试用例。
+
+【需求】
+{requirement}
+
+【严格要求 - 必须遵守】
+1. 代码部分只包含函数实现，绝对不能包含测试代码或"# 测试代码"等注释
+2. 测试部分只包含测试用例，绝对不能包含函数实现
+3. 代码和测试用例必须保持一致
+4. 测试用例的期望输出必须严格基于代码的实际行为
+5. 对于两数之和这类可能有多种返回顺序的问题，测试用例应使用 sorted() 比较或允许两种顺序
+6. 输出格式如下，必须严格遵守：
+
+<<<CODE>>>
+def function_name(param1, param2):
+    # 只有函数实现
+    return result
+<<<CODE_END>>>
+
+<<<TEST>>>
+from solution import function_name
+
+def test_case_1():
+    assert function_name(...) == expected
+
+def test_case_2():
+    result = function_name(...)
+    assert result == expected or result == alternative_expected
+<<<TEST_END>>>
+
+【重要】
+- 不要输出任何其他解释文字
+- 代码部分绝对不能包含测试代码
+- 测试部分绝对不能包含函数实现
+
+请生成：
+"""
+    
+    response = client.chat.completions.create(
+        model="glm-4-flash",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3  # 降低随机性，提高一致性
+    )
+    
+    raw = response.choices[0].message.content
+    
+    # 解析代码和测试
+    code_match = re.search(r'<<<CODE>>>(.*?)<<<CODE_END>>>', raw, re.DOTALL)
+    test_match = re.search(r'<<<TEST>>>(.*?)<<<TEST_END>>>', raw, re.DOTALL)
+    
+    code = _clean_code(code_match.group(1)) if code_match else ""
+    test_code = _clean_code(test_match.group(1)) if test_match else ""
+    
+    # 从代码中提取函数名，确保测试导入正确
+    if code and not test_code:
+        func_name = _extract_function_name(code)
+        # 如果测试代码为空，尝试单独生成
+        test_code = generate_test(code)
+    
+    return code, test_code
+
+
 def generate_test(code: str) -> str:
-    """根据代码生成测试用例"""
+    """根据代码生成测试用例（备用方案）"""
     func_name = _extract_function_name(code)
     
     prompt = f"""请为以下Python代码生成pytest测试用例。
 
+重要规则：
+1. 测试用例的期望输出必须严格基于代码的实际行为
+2. 先阅读代码理解它的返回值格式
+3. 对于可能有多种返回顺序的函数，使用 sorted() 比较或允许两种顺序
+
 要求：
-1. 只输出纯Python代码，不要用```python```或任何其他标记包裹
-2. 不要有任何解释文字
-3. 代码必须可以被pytest直接运行
-4. 测试函数命名以test_开头
-5. 被测试的代码会保存在 solution.py 文件中
-6. 所以测试代码必须写成：from solution import {func_name}
+1. 只输出纯Python代码
+2. 测试代码必须写成：from solution import {func_name}
 
 被测试的代码：
 {code}
@@ -73,22 +141,28 @@ def generate_test(code: str) -> str:
     return _clean_code(response.choices[0].message.content)
 
 
-def fix_code(code: str, error_log: str) -> str:
-    """根据错误日志修复代码"""
-    prompt = f"""以下代码运行出错，请修复代码中的问题。
+def fix_code(code: str, error_log: str, test_code: str, requirement: str) -> str:
+    """根据错误日志和测试用例修复代码"""
+    prompt = f"""以下代码运行测试失败，请分析并修复。
 
-要求：
-1. 只输出修复后的纯Python代码，不要用```python```或任何其他标记包裹
-2. 不要有任何解释文字
-3. 只输出修复后的完整代码
+【原始需求】
+{requirement}
 
-原始代码：
+【当前代码】
 {code}
 
-错误日志：
+【测试代码（包含期望输出）】
+{test_code}
+
+【错误日志】
 {error_log}
 
-修复后的代码：
+请分析：
+1. 是代码错了，还是测试用例的期望值错了？
+2. 如果是代码错了，修复代码
+3. 如果是测试用例错了，按照原始需求修复代码（不要修改测试用例）
+
+要求：只输出修复后的完整Python代码，不要有任何解释。
 """
     response = client.chat.completions.create(
         model="glm-4-flash",

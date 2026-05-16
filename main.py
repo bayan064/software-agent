@@ -1,22 +1,31 @@
-# main.py
-import sys
-from agent.llm_client import generate_code
+import argparse
+from agent.graph import app
+import os
 
 def main():
-    print("=== 代码生成智能体启动 ===")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", required=True, help="需求文件路径")
+    parser.add_argument("--output", default="./output", help="输出目录")
+    args = parser.parse_args()
     
-    # 测试：让大模型生成一个简单的Python函数
-    requirement = "写一个Python函数，输入两个数字，返回它们的和"
+    with open(args.input, "r", encoding="utf-8") as f:
+        requirement = f.read()
     
-    print(f"\n需求：{requirement}")
-    print("\n正在生成代码...")
+    # 确保输出目录存在
+    os.makedirs(args.output, exist_ok=True)
     
-    code = generate_code(requirement)
+    # ⚠️ 关键：把输出路径传给 graph
+    result = app.invoke({
+        "messages": [],
+        "steps": 0,
+        "code": "",
+        "test_code": "",
+        "test_result": {},
+        "requirement": requirement,
+        "output_dir": args.output  
+    })
     
-    print("\n生成的代码：")
-    print("-" * 40)
-    print(code)
-    print("-" * 40)
+    print(f"✅ 完成，结果保存在 {args.output}")
 
 if __name__ == "__main__":
     main()
