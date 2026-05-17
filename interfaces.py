@@ -6,8 +6,8 @@ def save_code(code: str, filepath: str) -> bool:
     保存代码到文件
     
     参数:
-        code: 代码字符串，例如 "print('hello')"
-        filepath: 文件路径，例如 "output/solution.py"
+        code: 代码字符串，例如 "print('hello')" 或 "public class Main {}"
+        filepath: 文件路径，例如 "output/solution.py" 或 "output/Solution.java"
     
     返回:
         bool: 成功返回 True，失败返回 False
@@ -15,19 +15,20 @@ def save_code(code: str, filepath: str) -> bool:
     pass
 
 
-def run_pytest(test_file_path: str) -> dict:
+def run_tests(test_file_path: str, language: str = "Python") -> dict:
     """
-    运行 pytest 测试文件
+    根据运行的语言（Python、Java等）执行对应的测试文件
     
     参数:
         test_file_path: 测试文件路径，例如 "output/test_solution.py"
+        language: 编程语言名称，默认为 "Python"，可支持 "Java"
     
     返回:
         dict: {
             "passed": int,      # 通过的测试数
             "failed": int,      # 失败的测试数
-            "output": str,      # pytest 完整输出
-            "returncode": int   # 0表示全部通过
+            "output": str,      # 测试框架的完整输出日志 (Stdout/Stderr)
+            "returncode": int   # 0表示全部通过，非0表示有失败或错误
         }
     """
     pass
