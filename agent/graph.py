@@ -8,11 +8,12 @@ import os
 # 添加项目根目录到路径，方便导入模块
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# 导入 Mock 工具函数（等室友A写完真实版本后，改这行就行）
-from tools.real_tools import save_code, run_pytest
+# 导入工具函数
+from tools.file_tools import save_code
+from tools.executor import run_pytest
 
-# 导入 LLM 客户端（用于生成代码和修复）
-from agent.llm_client import generate_code, generate_test, fix_code
+# 导入 LLM 客户端（使用新的 generate_code_and_test）
+from agent.llm_client import generate_code_and_test, fix_code
 
 
 # 1. 定义状态
@@ -23,7 +24,7 @@ class AgentState(TypedDict):
     test_code: str               # 测试代码
     test_result: Dict[str, Any]  # 测试结果
     requirement: str             # 用户需求
-
+    output_dir: str
 
 # 2. 创建图
 workflow = StateGraph(AgentState)
@@ -31,10 +32,11 @@ workflow = StateGraph(AgentState)
 
 # 3. 定义节点函数
 def generate_code_node(state: AgentState) -> dict:
-    """生成代码节点：调用LLM生成代码，并保存到文件"""
+    """生成代码节点：同时生成代码和测试用例"""
     print("🟡 生成代码节点被调用")
     
     requirement = state.get("requirement", "")
+    output_dir = state.get("output_dir", "output")  # 获取输出目录
     if not requirement:
         for msg in state.get("messages", []):
             if msg.startswith("需求:"):
@@ -42,20 +44,22 @@ def generate_code_node(state: AgentState) -> dict:
                 break
     
     print(f"📝 需求: {requirement[:100]}...")
-    
-    code = generate_code(requirement)
+    print(f"📁 输出目录: {output_dir}")
+
+    # 同时生成代码和测试
+    code, test_code = generate_code_and_test(requirement)
     print(f"✅ 代码生成完成，长度: {len(code)} 字符")
+    print(f"✅ 测试生成完成，长度: {len(test_code)} 字符")
     
     # 确保 output 目录存在
-    os.makedirs("output", exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     
     # 保存实现代码
-    impl_filepath = "output/solution.py"
+    impl_filepath = os.path.join(output_dir, "solution.py")
     save_code(code, impl_filepath)
     
-    # 生成并保存测试代码
-    test_code = generate_test(code)  # 现在会自动提取函数名
-    test_filepath = "output/test_solution.py"
+    # 保存测试代码
+    test_filepath = os.path.join(output_dir, "test_solution.py")
     save_code(test_code, test_filepath)
     
     print(f"📁 代码已保存到: {impl_filepath}")
@@ -64,19 +68,25 @@ def generate_code_node(state: AgentState) -> dict:
     return {
         "code": code,
         "test_code": test_code,
-        "messages": ["代码已生成并保存"],
+        "messages": ["代码和测试已生成并保存"],
         "steps": state.get("steps", 0) + 1
     }
+
 
 def run_tests_node(state: AgentState) -> dict:
     """运行测试节点：执行pytest并收集结果"""
     print("🟡 运行测试节点被调用")
-    
-    test_filepath = "output/test_solution.py"
+
+
+    output_dir = state.get("output_dir", "output")
+    test_filepath = os.path.join(output_dir, "test_solution.py")
     
     # 调用接口函数运行测试
     result = run_pytest(test_filepath)
-    
+
+    # 打印完整错误信息
+    print(result['output'])
+
     print(f"📊 测试结果: 通过={result['passed']}, 失败={result['failed']}")
     
     return {
@@ -89,20 +99,18 @@ def fix_code_node(state: AgentState) -> dict:
     """修复代码节点：根据错误日志修复代码"""
     print("🟡 修复代码节点被调用")
     
-    code = state.get("code", "")
-    test_result = state.get("test_result", {})
-    
-    # 提取错误日志
-    error_log = test_result.get("output", "未知错误")
-    
-    print(f"🔧 正在根据错误日志修复代码...")
-    
-    # 调用 LLM 修复代码
-    fixed_code = fix_code(code, error_log)
+    output_dir = state.get("output_dir", "output")
+
+    fixed_code = fix_code(
+        code=state.get("code", ""),
+        error_log=state.get("test_result", {}).get("output", ""),
+        test_code=state.get("test_code", ""),
+        requirement=state.get("requirement", "")
+    )
     
     # 保存修复后的代码
-    filepath = "output/solution_fixed.py"
-    os.makedirs("output", exist_ok=True)
+    filepath = os.path.join(output_dir, "solution.py")
+    os.makedirs(output_dir, exist_ok=True)
     save_code(fixed_code, filepath)
     
     print(f"✅ 代码已修复，保存到: {filepath}")
