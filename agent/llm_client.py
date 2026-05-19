@@ -43,6 +43,36 @@ def _clean_code(raw: str) -> str:
     return '\n'.join(lines).strip()
 
 
+def _split_embedded_python_tests(code: str) -> tuple:
+    """
+    Split embedded pytest content from code when model returns tests in code block.
+    Returns (clean_code, extracted_test_code).
+    """
+    if not code:
+        return code, ""
+
+    patterns = [
+        r'^\s*#\s*测试代码',
+        r'^\s*from\s+solution\s+import\s+\w+',
+        r'^\s*import\s+pytest\b',
+        r'^\s*def\s+test_\w+\s*\(',
+    ]
+
+    match_positions = []
+    for pattern in patterns:
+        match = re.search(pattern, code, re.MULTILINE)
+        if match:
+            match_positions.append(match.start())
+
+    if not match_positions:
+        return code, ""
+
+    split_at = min(match_positions)
+    clean_code = code[:split_at].rstrip()
+    test_code = code[split_at:].lstrip()
+    return clean_code, test_code
+
+
 def _ensure_java_imports(test_code: str) -> str:
     """确保 Java 测试代码包含必要的 import 语句"""
     required_imports = [
@@ -169,7 +199,6 @@ def test_case_1():
 - 不要输出任何其他解释文字
 
 请生成："""
-
     response = client.chat.completions.create(
         model="glm-4-flash",
         messages=[{"role": "user", "content": prompt}],
@@ -185,6 +214,10 @@ def test_case_1():
     code = _clean_code(code_match.group(1)) if code_match else ""
     test_code = _clean_code(test_match.group(1)) if test_match else ""
 
+    if language == "Python":
+        code, embedded_tests = _split_embedded_python_tests(code)
+        if not test_code and embedded_tests:
+            test_code = embedded_tests
     # 确保 Java 测试代码包含必要的导入
     if language == "Java" and test_code:
         test_code = _ensure_java_imports(test_code)
