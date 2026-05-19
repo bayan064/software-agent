@@ -28,14 +28,22 @@ export function activate(context: vscode.ExtensionContext) {
 
         vscode.window.showInformationMessage('正在生成代码，请稍候...');
 
+        const config = vscode.workspace.getConfiguration('agent-ui');
+        const baseUrl = config.get<string>('baseUrl') ?? 'http://127.0.0.1:8000';
+        const timeoutMs = config.get<number>('timeoutMs') ?? 15000;
+        const endpoint = new URL('/generate', baseUrl).toString();
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
         try {
             // 2. 调用你的后端API
-            const response = await fetch('http://127.0.0.1:8000/generate', {
+            const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ requirement })
+                body: JSON.stringify({ requirement }),
+                signal: controller.signal
             });
 
             if (!response.ok) {
@@ -67,8 +75,14 @@ export function activate(context: vscode.ExtensionContext) {
 
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            vscode.window.showErrorMessage(`调用智能体失败：${message}`);
-            console.error(error);
+            const cause = error instanceof Error ? (error as { cause?: unknown }).cause : undefined;
+            const causeMessage = cause instanceof Error ? cause.message : cause ? String(cause) : '';
+            const detail = causeMessage ? ` (${causeMessage})` : '';
+            const timeoutNote = message === 'This operation was aborted' ? ` (timeout ${timeoutMs}ms)` : '';
+            vscode.window.showErrorMessage(`调用智能体失败：${message}${detail}${timeoutNote}`);
+            console.error('agent-ui fetch failed', { message, cause, timeoutMs, endpoint });
+        } finally {
+            clearTimeout(timeoutId);
         }
     });
 

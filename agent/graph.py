@@ -43,6 +43,16 @@ def generate_code_node(state: AgentState) -> dict:
                 requirement = msg.replace("需求:", "").strip()
                 break
     
+    if "文档" in requirement:
+        doc_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "test_cases.md")
+        try:
+            with open(doc_path, "r", encoding="utf-8") as f:
+                doc_content = f.read().strip()
+            if doc_content:
+                requirement = f"{requirement}\n\n【文档内容】\n{doc_content}"
+        except OSError:
+            print("⚠️ 未能读取 docs/test_cases.md，按原需求继续")
+
     print(f"📝 需求: {requirement[:100]}...")
     print(f"📁 输出目录: {output_dir}")
 
