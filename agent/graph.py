@@ -25,6 +25,19 @@ class AgentState(TypedDict):
     test_result: Dict[str, Any]  # 测试结果
     requirement: str             # 用户需求
     output_dir: str
+    language: str   
+
+def get_file_extension(language: str) -> tuple:
+    """根据语言返回文件扩展名和测试文件扩展名"""
+    if language == "Java":
+        return "java", "java"
+    else:  # Python
+        return "py", "py"
+
+
+def get_test_runner(language: str) -> str:
+    """返回测试运行器名称"""
+    return "pytest" if language == "Python" else "junit"
 
 # 2. 创建图
 workflow = StateGraph(AgentState)
@@ -37,6 +50,9 @@ def generate_code_node(state: AgentState) -> dict:
     
     requirement = state.get("requirement", "")
     output_dir = state.get("output_dir", "output")  # 获取输出目录
+    language = state.get("language", "Python")
+
+
     if not requirement:
         for msg in state.get("messages", []):
             if msg.startswith("需求:"):
@@ -45,21 +61,27 @@ def generate_code_node(state: AgentState) -> dict:
     
     print(f"📝 需求: {requirement[:100]}...")
     print(f"📁 输出目录: {output_dir}")
+    print(f"💻 目标语言: {language}")
 
-    # 同时生成代码和测试
-    code, test_code = generate_code_and_test(requirement)
+    #根据语言 同时生成代码和测试
+    code, test_code = generate_code_and_test(requirement,language)
     print(f"✅ 代码生成完成，长度: {len(code)} 字符")
     print(f"✅ 测试生成完成，长度: {len(test_code)} 字符")
     
     # 确保 output 目录存在
     os.makedirs(output_dir, exist_ok=True)
+
+    # 根据语言选择文件扩展名
+    ext, test_ext = get_file_extension(language)
     
     # 保存实现代码
-    impl_filepath = os.path.join(output_dir, "solution.py")
+    impl_filename = f"Solution.{ext}" if language == "Java" else f"solution.{ext}"
+    impl_filepath = os.path.join(output_dir, impl_filename)
     save_code(code, impl_filepath)
-    
+
     # 保存测试代码
-    test_filepath = os.path.join(output_dir, "test_solution.py")
+    test_filename = f"TestSolution.{test_ext}" if language == "Java" else f"test_solution.{test_ext}"
+    test_filepath = os.path.join(output_dir, test_filename)
     save_code(test_code, test_filepath)
     
     print(f"📁 代码已保存到: {impl_filepath}")
@@ -68,7 +90,7 @@ def generate_code_node(state: AgentState) -> dict:
     return {
         "code": code,
         "test_code": test_code,
-        "messages": ["代码和测试已生成并保存"],
+        "messages": [f"{language}代码和测试已生成并保存"],
         "steps": state.get("steps", 0) + 1
     }
 
@@ -79,16 +101,38 @@ def run_tests_node(state: AgentState) -> dict:
 
 
     output_dir = state.get("output_dir", "output")
-    test_filepath = os.path.join(output_dir, "test_solution.py")
-    
-    # 调用接口函数运行测试
-    result = run_pytest(test_filepath)
+    language = state.get("language", "Python")
 
-    # 打印完整错误信息
-    print(result['output'])
+     # 根据语言构建测试文件路径
+    if language == "Java":
+        test_filepath = os.path.join(output_dir, "TestSolution.java")
+    else:  # Python
+        test_filepath = os.path.join(output_dir, "test_solution.py")
+    
+    # 检查测试文件是否存在
+    if not os.path.exists(test_filepath):
+        error_msg = f"测试文件不存在: {test_filepath}"
+        print(f"❌ {error_msg}")
+        return {
+            "test_result": {
+                "passed": 0,
+                "failed": 1,
+                "output": error_msg,
+                "returncode": -1
+            },
+            "messages": [error_msg]
+        }
+
+    # 调用接口函数运行测试，传入语言参数
+    result = run_pytest(test_filepath, language=language)
+
+    # 打印输出（限制长度）
+    output_preview = result['output'][-1000:] if len(result['output']) > 1000 else result['output']
+    print(output_preview)
 
     print(f"📊 测试结果: 通过={result['passed']}, 失败={result['failed']}")
-    
+    print(f"📊 返回码: {result['returncode']}")
+
     return {
         "test_result": result,
         "messages": [f"测试完成: 通过{result['passed']}个, 失败{result['failed']}个"]
@@ -100,16 +144,42 @@ def fix_code_node(state: AgentState) -> dict:
     print("🟡 修复代码节点被调用")
     
     output_dir = state.get("output_dir", "output")
-
-    fixed_code = fix_code(
-        code=state.get("code", ""),
-        error_log=state.get("test_result", {}).get("output", ""),
-        test_code=state.get("test_code", ""),
-        requirement=state.get("requirement", "")
-    )
+    language = state.get("language", "Python")
+    
+    # 根据语言选择要修复的文件
+    if language == "Java":
+        # 对于 Java，只修复 Solution.java
+        current_code = state.get("code", "")
+        error_log = state.get("test_result", {}).get("output", "")
+        
+        # 检查错误是否来自 Solution.java 中错误地包含了 import
+        if "Solution.java" in error_log and "import" in error_log:
+            # 清理当前代码，移除可能的 import 语句
+            lines = current_code.split('\n')
+            cleaned_lines = [line for line in lines if not line.strip().startswith('import ')]
+            current_code = '\n'.join(cleaned_lines)
+            print("🧹 已清理 Solution.java 中的错误 import 语句")
+        
+        fixed_code = fix_code(
+            code=current_code,
+            error_log=error_log,
+            test_code=state.get("test_code", ""),
+            requirement=state.get("requirement", ""),
+            language=language
+        )
+    else:
+        fixed_code = fix_code(
+            code=state.get("code", ""),
+            error_log=state.get("test_result", {}).get("output", ""),
+            test_code=state.get("test_code", ""),
+            requirement=state.get("requirement", ""),
+            language=language
+        )
     
     # 保存修复后的代码
-    filepath = os.path.join(output_dir, "solution.py")
+    ext, _ = get_file_extension(language)
+    impl_filename = f"Solution.{ext}" if language == "Java" else f"solution.{ext}"
+    filepath = os.path.join(output_dir, impl_filename)
     os.makedirs(output_dir, exist_ok=True)
     save_code(fixed_code, filepath)
     
@@ -117,7 +187,7 @@ def fix_code_node(state: AgentState) -> dict:
     
     return {
         "code": fixed_code,
-        "messages": ["代码已修复"],
+        "messages": [f"{language}代码已修复"],
         "steps": state.get("steps", 0) + 1
     }
 
@@ -176,13 +246,21 @@ if __name__ == "__main__":
     print("开始测试智能体流程")
     print("=" * 50)
     
+    for lang in ["Python", "Java"]:
+        print("=" * 50)
+        print(f"测试 {lang} 语言")
+        print("=" * 50)
+
+
     result = app.invoke({
         "messages": [],
         "steps": 0,
         "code": "",
         "test_code": "",
         "test_result": {},
-        "requirement": test_requirement
+        "requirement": test_requirement,
+        "output_dir": f"test_output_{lang.lower()}",
+        "language": lang
     })
     
     print("\n" + "=" * 50)
