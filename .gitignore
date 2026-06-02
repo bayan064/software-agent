@@ -223,3 +223,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# 忽略下载的官方数据集
+HumanEval.jsonl.gz
+HumanEval.jsonl
+
+# 忽略自动生成的测试题和期望指标
+tests/requirements/req_humaneval_*
+tests/eval_references/eval_humaneval_*
+
+# 忽略智能体运行的输出结果
+benchmark_results/
