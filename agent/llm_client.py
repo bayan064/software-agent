@@ -3,7 +3,7 @@ import os
 import re
 from openai import OpenAI
 
-print("我正在加载 llm_client.py，包名是 zhipuai")
+print("我正在加载 llm_client.py，包名是 DEEPSEEK_API")
 
 # 从环境变量读取API Key
 api_key = os.environ.get("DEEPSEEK_API_KEY")
