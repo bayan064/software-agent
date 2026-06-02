@@ -328,3 +328,95 @@ def generate_code(requirement: str, language: str = "Python") -> str:
     print("⚠️ 警告: generate_code 已废弃，请使用 generate_code_and_test")
     code, _ = generate_code_and_test(requirement, language)
     return code
+
+# ============================================================
+# 组合 A：分析 + 设计 核心实现
+# ============================================================
+
+def generate_design_models(requirement: str) -> dict:
+    """
+    根据需求自动生成系统分析与设计模型（包含类图和活动图/状态机图，采用 PlantUML 格式）
+    """
+    print("🤖 正在调用大模型生成设计模型...")
+    
+    prompt = f"""请根据以下用户需求/PRD，进行系统分析与设计，并输出对应的系统架构设计模型。
+
+【用户需求】
+{requirement}
+
+【严格要求】
+1. 你必须至少设计并输出两种图表：
+   - 类图 (Class Diagram)：展示系统的核心类、属性、方法以及类之间的关系（泛化、组合、聚合、关联等）。
+   - 活动图 (Activity Diagram) 或 状态机图 (State Machine Diagram)：展示核心业务流程或状态流转。
+2. 图表必须严格采用 **PlantUML** 语法编写。
+3. 请将图表放在指定的标记块中，不要有任何拖泥带水的解释。
+
+【活动图 PlantUML 语法要求 - 必须严格遵守】
+1. 每一行语句必须以英文分号 ; 结尾
+2. 分支必须写为: if (条件?) then (标签)
+3. 循环必须写为: while (条件) is (标签)
+4. 标签只能用英文或简单中文，不要有特殊符号
+5. 示例正确格式:
+   start
+   :读入数据;
+   if (x > 0?) then (是)
+     :处理正数;
+   else (否)
+     :处理负数;
+   endif
+   stop
+
+【输出格式 - 必须严格遵守】
+<<<CLASS_DIAGRAM>>>
+@startuml
+' 在此编写 PlantUML 类图代码
+@endum
+<<<CLASS_DIAGRAM_END>>>
+
+<<<ACTIVITY_DIAGRAM>>>
+@startuml
+' 在此编写 PlantUML 活动图或状态机图代码
+@endum
+<<<ACTIVITY_DIAGRAM_END>>>
+
+<<<TEXT_DESIGN>>>
+### 系统分析与设计说明
+（在此对系统整体架构、设计模式选择、核心模块职责进行简要的文字说明）
+<<<TEXT_DESIGN_END>>>
+"""
+
+    response = client.chat.completions.create(
+        model="glm-4-flash",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    
+    content = response.choices[0].message.content
+    
+    # 提取类图
+    class_match = re.search(r'<<<CLASS_DIAGRAM>>>\s*(.*?)\s*<<<CLASS_DIAGRAM_END>>>', content, re.DOTALL)
+    class_diagram = class_match.group(1).strip() if class_match else ""
+    if not class_diagram and "@startuml" in content:
+        # 兜底：如果模型没写标签但写了 @startuml
+        puml_blocks = re.findall(r'(@startuml.*?@endum)', content, re.DOTALL)
+        if len(puml_blocks) > 0: class_diagram = puml_blocks[0]
+        
+    # 提取活动图/状态图
+    activity_match = re.search(r'<<<ACTIVITY_DIAGRAM>>>\s*(.*?)\s*<<<ACTIVITY_DIAGRAM_END>>>', content, re.DOTALL)
+    activity_diagram = activity_match.group(1).strip() if activity_match else ""
+    if not activity_diagram and "@startuml" in content:
+        puml_blocks = re.findall(r'(@startuml.*?@endum)', content, re.DOTALL)
+        if len(puml_blocks) > 1: activity_diagram = puml_blocks[1]
+        
+    # 提取设计说明文字
+    text_match = re.search(r'<<<TEXT_DESIGN>>>\s*(.*?)\s*<<<TEXT_DESIGN_END>>>', content, re.DOTALL)
+    text_design = text_match.group(1).strip() if text_match else "未生成文本说明。"
+
+    # 如果提取失败，进行二次清晰化清理
+    class_diagram = _clean_code(class_diagram)
+    activity_diagram = _clean_code(activity_diagram)
+
+    return {
+        "class_diagram": class_diagram,
+        "activity_diagram": activity_diagram,
+        "text_design": text_design
+    }
