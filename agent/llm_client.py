@@ -49,6 +49,66 @@ def _clean_code(raw: str) -> str:
     return '\n'.join(lines).strip()
 
 
+def _strip_test_functions(code: str) -> str:
+    """移除意外混入的 pytest 测试函数"""
+    lines = code.splitlines()
+    cleaned = []
+    skipping = False
+    base_indent = 0
+
+    for line in lines:
+        if not skipping and re.match(r'^\s*def\s+test_\w+\s*\(', line):
+            skipping = True
+            base_indent = len(line) - len(line.lstrip())
+            continue
+
+        if skipping:
+            if line.strip() == "":
+                continue
+            current_indent = len(line) - len(line.lstrip())
+            if current_indent <= base_indent and re.match(r'^\s*(def|class)\s+', line):
+                skipping = False
+                cleaned.append(line)
+            else:
+                continue
+        else:
+            cleaned.append(line)
+
+    return "\n".join(cleaned).strip()
+
+
+def _strip_function_definition(code: str, func_name: str) -> str:
+    """移除测试代码里误写的实现函数"""
+    if not func_name:
+        return code
+
+    lines = code.splitlines()
+    cleaned = []
+    skipping = False
+    base_indent = 0
+    pattern = rf'^\s*def\s+{re.escape(func_name)}\s*\('
+
+    for line in lines:
+        if not skipping and re.match(pattern, line):
+            skipping = True
+            base_indent = len(line) - len(line.lstrip())
+            continue
+
+        if skipping:
+            if line.strip() == "":
+                continue
+            current_indent = len(line) - len(line.lstrip())
+            if current_indent <= base_indent and re.match(r'^\s*(def|class)\s+', line):
+                skipping = False
+                cleaned.append(line)
+            else:
+                continue
+        else:
+            cleaned.append(line)
+
+    return "\n".join(cleaned).strip()
+
+
 def _split_embedded_python_tests(code: str) -> tuple:
     """
     Split embedded pytest content from code when model returns tests in code block.
@@ -218,19 +278,19 @@ def test_case_1():
 
     code = _clean_code(code_match.group(1)) if code_match else ""
     test_code = _clean_code(test_match.group(1)) if test_match else ""
-
     if language == "Python":
+        code = _strip_test_functions(code)
         code, embedded_tests = _split_embedded_python_tests(code)
         if not test_code and embedded_tests:
             test_code = embedded_tests
-    # 确保 Java 测试代码包含必要的导入
+        if test_code:
+            func_name = _extract_function_name(code, language)
+            test_code = _strip_function_definition(test_code, func_name)
     if language == "Java" and test_code:
         test_code = _ensure_java_imports(test_code)
 
-    # 如果测试代码为空，尝试单独生成
     if code and not test_code:
         test_code = _generate_test_only(code, language)
-
     return code, test_code
 
 
