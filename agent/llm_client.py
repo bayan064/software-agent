@@ -1,16 +1,22 @@
 # agent/llm_client.py
 import os
 import re
-from zhipuai import ZhipuAI
+from openai import OpenAI
 
 print("我正在加载 llm_client.py，包名是 zhipuai")
 
 # 从环境变量读取API Key
-api_key = os.environ.get("ZHIPU_API_KEY")
+api_key = os.environ.get("DEEPSEEK_API_KEY")
 if not api_key:
-    raise ValueError("请设置环境变量 ZHIPU_API_KEY，例如：export ZHIPU_API_KEY='你的密钥'")
+    raise ValueError("请设置环境变量 DEEPSEEK_API_KEY，例如：export DEEPSEEK_API_KEY='你的密钥'")
 
-client = ZhipuAI(api_key=api_key)
+client = OpenAI(
+    api_key=os.environ.get("DEEPSEEK_API_KEY"),
+    base_url="https://api.deepseek.com"  # DeepSeek 的接口地址[citation:2][citation:8]
+)
+
+# Default to a supported DeepSeek model; allow override via env var.
+MODEL_NAME = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
 
 def _extract_function_name(code: str, language: str = "Python") -> str:
@@ -123,7 +129,7 @@ def generate_code_and_test(requirement: str, language: str = "Python") -> tuple:
 - 使用 public class Solution
 - 方法使用合适的访问修饰符
 - 不需要main方法
-- 绝对不要包含任何 import 语句
+- 允许并鼓励导入标准库（如 import java.util.*; import java.util.stream.*; 等），请将 import 写在类定义的最上方。
 
 【JUnit测试要求】
 - 测试类名为 TestSolution
@@ -166,7 +172,6 @@ public class TestSolution {{
 
 【重要】
 - 不要输出任何其他解释文字
-- 代码部分绝对不能包含 import 语句
 - 测试部分必须包含 import 和 static import
 
 请生成："""
@@ -200,7 +205,7 @@ def test_case_1():
 
 请生成："""
     response = client.chat.completions.create(
-        model="glm-4-flash",
+        model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3
     )
@@ -260,7 +265,7 @@ def _generate_test_only(code: str, language: str = "Python") -> str:
 测试代码："""
     
     response = client.chat.completions.create(
-        model="glm-4-flash",
+        model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}]
     )
     test_code = _clean_code(response.choices[0].message.content)
@@ -291,9 +296,9 @@ def fix_code(code: str, error_log: str, test_code: str, requirement: str, langua
 {error_log}
 
 重要：
-1. 请只修复 Solution.java 中的代码
-2. 绝对不要在 Solution.java 中添加任何 import 语句
-3. 确保 Solution.java 中只有类定义
+1. 请只修复 Solution.java 中的代码。
+2. 如果错误日志显示 "cannot find symbol" 或缺少类型，请务必在 Solution.java 最上方添加相应的 import 语句（如 import java.util.*;）。
+3. 确保 Solution.java 中只有必要的 import 语句和类定义。
 
 要求：只输出修复后的完整 Solution.java 代码，不要有任何解释。
 
@@ -316,7 +321,7 @@ def fix_code(code: str, error_log: str, test_code: str, requirement: str, langua
 要求：只输出修复后的完整{language}代码，不要有任何解释。"""
     
     response = client.chat.completions.create(
-        model="glm-4-flash",
+        model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}]
     )
     return _clean_code(response.choices[0].message.content)
@@ -386,7 +391,7 @@ def generate_design_models(requirement: str) -> dict:
 """
 
     response = client.chat.completions.create(
-        model="glm-4-flash",
+        model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}]
     )
     

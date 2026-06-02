@@ -14,10 +14,20 @@ from agent.graph import app
 # 函数式接口（供其他 Python 脚本或插件调用）
 # ============================================================
 
-def run_design_only(requirement: str, output_dir: str = "./output", format: str = "plantuml") -> Dict[str, Any]:
+def _resolve_output_dir(output_dir: str, input_name: str | None) -> str:
+    return os.path.join(output_dir, input_name) if input_name else output_dir
+
+
+def run_design_only(
+    requirement: str,
+    output_dir: str = "./output",
+    format: str = "plantuml",
+    input_name: str | None = None
+) -> Dict[str, Any]:
     """
     只运行设计模式（组合a）
     """
+    output_dir = _resolve_output_dir(output_dir, input_name)
     os.makedirs(output_dir, exist_ok=True)
     
     return app.invoke({
@@ -34,10 +44,16 @@ def run_design_only(requirement: str, output_dir: str = "./output", format: str 
     })
 
 
-def run_code_only(requirement: str, output_dir: str = "./output", language: str = "Python") -> Dict[str, Any]:
+def run_code_only(
+    requirement: str,
+    output_dir: str = "./output",
+    language: str = "Python",
+    input_name: str | None = None
+) -> Dict[str, Any]:
     """
     只运行编码和测试模式（组合b）
     """
+    output_dir = _resolve_output_dir(output_dir, input_name)
     os.makedirs(output_dir, exist_ok=True)
     
     return app.invoke({
@@ -54,11 +70,17 @@ def run_code_only(requirement: str, output_dir: str = "./output", language: str 
     })
 
 
-def run_fix_only(requirement: str, output_dir: str = "./output", language: str = "Python") -> Dict[str, Any]:
+def run_fix_only(
+    requirement: str,
+    output_dir: str = "./output",
+    language: str = "Python",
+    input_name: str | None = None
+) -> Dict[str, Any]:
     """
     组合 C：独立自愈修复模式（新追加）
     直接读取输出目录下的现有代码，执行测试并进行修复循环
     """
+    output_dir = _resolve_output_dir(output_dir, input_name)
     os.makedirs(output_dir, exist_ok=True)
     
     ext = "java" if language == "Java" else "py"
@@ -97,10 +119,16 @@ def run_fix_only(requirement: str, output_dir: str = "./output", language: str =
     })
 
 
-def run_full_workflow(requirement: str, output_dir: str = "./output", language: str = "Python") -> Dict[str, Any]:
+def run_full_workflow(
+    requirement: str,
+    output_dir: str = "./output",
+    language: str = "Python",
+    input_name: str | None = None
+) -> Dict[str, Any]:
     """
     运行完整流程（组合a + 组合b）
     """
+    output_dir = _resolve_output_dir(output_dir, input_name)
     os.makedirs(output_dir, exist_ok=True)
     
     return app.invoke({
@@ -141,20 +169,23 @@ def main():
     with open(args.input, 'r', encoding='utf-8') as f:
         requirement = f.read().strip()
         
+    input_name = os.path.splitext(os.path.basename(args.input))[0]
+    output_dir = _resolve_output_dir(args.output, input_name)
+
     print(f"🚀 智能体启动...")
     print(f"📋 任务类型: {args.task}")
     print(f"📝 编程语言: {args.language}")
-    print(f"📂 输出目录: {args.output}")
+    print(f"📂 输出目录: {output_dir}")
     print(f"--- 需求内容预览 ---")
     print(requirement[:200] + ("..." if len(requirement) > 200 else ""))
     print(f"------------------")
     
     # 任务分发映射表中优雅追加 "fix" 路由
     task_handlers = {
-        "design": lambda req, out, lang: run_design_only(req, out),
-        "code": lambda req, out, lang: run_code_only(req, out, lang),
-        "fix": lambda req, out, lang: run_fix_only(req, out, lang),  # 新增组合C处理器
-        "full": lambda req, out, lang: run_full_workflow(req, out, lang)
+        "design": lambda req, out, lang, name: run_design_only(req, out, input_name=name),
+        "code": lambda req, out, lang, name: run_code_only(req, out, lang, input_name=name),
+        "fix": lambda req, out, lang, name: run_fix_only(req, out, lang, input_name=name),  # 新增组合C处理器
+        "full": lambda req, out, lang, name: run_full_workflow(req, out, lang, input_name=name)
     }
     
     handler = task_handlers.get(args.task)
@@ -163,7 +194,7 @@ def main():
         sys.exit(1)
         
     # 执行智能体图流程
-    result = handler(requirement, args.output, args.language)
+    result = handler(requirement, args.output, args.language, input_name)
     
     # 漂亮的控制台输出结果打印展示
     print(f"\n✨ 智能体执行完毕！")
@@ -186,7 +217,7 @@ def main():
         print(f"\n📊 测试结果: 通过={test_result.get('passed', 0)}, 失败={test_result.get('failed', 0)}")
         print(f"🔄 修复次数: {result.get('steps', 0)}")
         
-    print(f"\n📁 输出文件保存在: {args.output}")
+    print(f"\n📁 输出文件保存在: {output_dir}")
     
     # 根据任务类型和测试结果返回退出码
     if args.task == "design":
