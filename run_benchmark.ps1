@@ -14,33 +14,46 @@ $testCases = @(
     @{Name="longest_palindrome"; File="tests/requirements/req_longest_palindrome.txt"}
 )
 
-$results = @{}
+# 支持的语言列表
+$languages = @("Python", "Java")
 
-foreach ($test in $testCases) {
-    Write-Host "`n==========================================" -ForegroundColor Yellow
-    Write-Host "Testing: $($test.Name)" -ForegroundColor Yellow
-    Write-Host "==========================================" -ForegroundColor Yellow
+foreach ($language in $languages) {
+    Write-Host "`n==========================================" -ForegroundColor Green
+    Write-Host "Testing Language: $language" -ForegroundColor Green
+    Write-Host "==========================================" -ForegroundColor Green
     
-    $outputDir = "benchmark_results/$($test.Name)"
+    $results = @{}
     
-    python main.py --input $test.File --output $outputDir
-    
-    if ($LASTEXITCODE -eq 0) {
-        $results[$test.Name] = "PASS"
-        Write-Host "PASS" -ForegroundColor Green
-    } else {
-        $results[$test.Name] = "FAIL"
-        Write-Host "FAIL" -ForegroundColor Red
+    foreach ($test in $testCases) {
+        Write-Host "`n------------------------------------------" -ForegroundColor Yellow
+        Write-Host "Testing: $($test.Name) with $language" -ForegroundColor Yellow
+        Write-Host "------------------------------------------" -ForegroundColor Yellow
+        
+        $outputDir = "benchmark_results/$language/$($test.Name)"
+        
+        python main.py --input $test.File --output $outputDir --language $language
+        
+        if ($LASTEXITCODE -eq 0) {
+            $results[$test.Name] = "PASS"
+            Write-Host "✅ PASS" -ForegroundColor Green
+        } else {
+            $results[$test.Name] = "FAIL"
+            Write-Host "❌ FAIL" -ForegroundColor Red
+        }
     }
+    
+    Write-Host "`n==========================================" -ForegroundColor Cyan
+    Write-Host "Results Summary for $language" -ForegroundColor Cyan
+    Write-Host "==========================================" -ForegroundColor Cyan
+    
+    foreach ($test in $testCases) {
+        Write-Host "$($results[$test.Name])  $($test.Name)"
+    }
+    
+    $passed = ($results.Values | Where-Object { $_ -eq "PASS" }).Count
+    Write-Host "`nSuccess Rate for ${language}: $passed/$($testCases.Count)"
 }
 
 Write-Host "`n==========================================" -ForegroundColor Cyan
-Write-Host "Benchmark Results Summary" -ForegroundColor Cyan
+Write-Host "All Benchmarks Completed" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
-
-foreach ($test in $testCases) {
-    Write-Host "$($results[$test.Name])  $($test.Name)"
-}
-
-$passed = ($results.Values | Where-Object { $_ -eq "PASS" }).Count
-Write-Host "`nSuccess Rate: $passed/$($testCases.Count)"
