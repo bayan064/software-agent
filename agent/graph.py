@@ -169,12 +169,20 @@ def router_start(state: AgentState) -> str:
         return "generate_design"
     elif task == "code":
         return "generate_code"
+    elif task == "fix":
+        # 组合 C 核心：如果已经有了测试结果和报错信息，直接送去 fix_code 修复
+        test_result = state.get("test_result", {})
+        if test_result.get("failed", 0) > 0:
+            return "fix_code"
+        return "run_tests" # 否则先测一下看看错在哪
     else: # full 流程先生成设计
         return "generate_design"
 
 workflow.set_conditional_entry_point(router_start, {
     "generate_design": "generate_design",
-    "generate_code": "generate_code"
+    "generate_code": "generate_code",
+    "fix_code": "fix_code",
+    "run_tests": "run_tests"
 })
 
 
