@@ -1,0 +1,63 @@
+﻿@startuml
+' ====== 软件工程智能体系统核心类图 ======
+
+package "交互接口层" {
+  class CLI {
+    +main()
+  }
+  
+  class APIServer {
+    +POST /generate()
+  }
+}
+
+package "业务流核心层" {
+  class AgentWorkflow {
+    +StateGraph workflow
+    +invoke(AgentState)
+  }
+
+  class AgentState <<TypedDict>> {
+    +requirement: str
+    +task: str
+    +language: str
+    +output_dir: str
+    +code: str
+    +test_code: str
+    +test_result: dict
+    +design_models: dict
+    +steps: int
+  }
+
+  class GraphNodes <<Functions>> {
+    +generate_design_node()
+    +generate_code_node()
+    +run_tests_node()
+    +fix_code_node()
+  }
+}
+
+package "模型与工具层" {
+  class LLMClient {
+    +generate_design_models()
+    +generate_code_and_test()
+    +fix_code()
+  }
+
+  class Tools {
+    +save_code(code, filepath)
+    +run_pytest(test_path, language)
+  }
+}
+
+' 依赖关系映射
+CLI --> AgentWorkflow : 触发
+APIServer --> AgentWorkflow : 触发
+
+AgentWorkflow *--> AgentState : 状态管理
+AgentWorkflow *--> GraphNodes : 流程节点绑定
+
+GraphNodes --> LLMClient : AI 推理能力
+GraphNodes --> Tools : 本地环境执行
+
+@enduml
