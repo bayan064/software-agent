@@ -53,6 +53,8 @@ def compile_java(java_file_path: str) -> tuple:
             cwd=test_dir,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30
         )
         
@@ -87,6 +89,8 @@ def run_java_tests(test_file_path: str) -> dict:
             cwd=test_dir,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30
         )
         
@@ -115,7 +119,7 @@ def run_java_tests(test_file_path: str) -> dict:
         return {
             'passed': passed,
             'failed': failed,
-            'output': output[-2000:],
+            'output': output[-8000:],
             'returncode': result.returncode
         }
         
@@ -140,6 +144,8 @@ def run_pytests(test_file_path: str, language: str = "Python") -> dict:
                 cwd=test_dir,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 env=env,
                 timeout=30
             )
