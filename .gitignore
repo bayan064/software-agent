@@ -200,7 +200,11 @@ cython_debug/
 # Visual Studio Code
 
 # Project-generated outputs
+outputs/
 output/
+full_output/
+design_output/
+benchmark_results/
 extension/out/
 #   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
 #   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
@@ -231,6 +235,8 @@ HumanEval.jsonl
 # 忽略自动生成的测试题和期望指标
 tests/requirements/req_humaneval_*
 tests/eval_references/eval_humaneval_*
+tests/humaneval/requirements/req_humaneval_*
+tests/humaneval/eval_references/eval_humaneval_*
 
 # 忽略智能体运行的输出结果
-benchmark_results/
+outputs/benchmark_results/
