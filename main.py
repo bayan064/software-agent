@@ -1,15 +1,15 @@
 # main.py
+import sys
+import io
+# 设置标准输出为 UTF-8 编码
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 import argparse
 import os
 import sys
 from typing import Dict, Any
-
-# Avoid UnicodeEncodeError on Windows consoles (e.g., GBK) by replacing unsupported chars.
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(errors="replace")
-if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(errors="replace")
-
+import sys
+import io
 # 添加项目根目录到路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -26,7 +26,7 @@ def _resolve_output_dir(output_dir: str, input_name: str | None) -> str:
 
 def run_design_only(
     requirement: str,
-    output_dir: str = "./outputs",
+    output_dir: str = "./output",
     format: str = "plantuml",
     input_name: str | None = None
 ) -> Dict[str, Any]:
@@ -52,7 +52,7 @@ def run_design_only(
 
 def run_code_only(
     requirement: str,
-    output_dir: str = "./outputs",
+    output_dir: str = "./output",
     language: str = "Python",
     input_name: str | None = None
 ) -> Dict[str, Any]:
@@ -78,7 +78,7 @@ def run_code_only(
 
 def run_fix_only(
     requirement: str,
-    output_dir: str = "./outputs",
+    output_dir: str = "./output",
     language: str = "Python",
     input_name: str | None = None
 ) -> Dict[str, Any]:
@@ -127,7 +127,7 @@ def run_fix_only(
 
 def run_full_workflow(
     requirement: str,
-    output_dir: str = "./outputs",
+    output_dir: str = "./output",
     language: str = "Python",
     input_name: str | None = None
 ) -> Dict[str, Any]:
@@ -159,7 +159,7 @@ def main():
     parser = argparse.ArgumentParser(description='LLM Based Software Engineering Agent CLI')
     
     parser.add_argument('--input', type=str, required=True, help='输入需求文件路径 (txt)')
-    parser.add_argument('--output', type=str, default='./outputs', help='输出结果目录')
+    parser.add_argument('--output', type=str, default='./output', help='输出结果目录')
     # 在 choices 中追加 'fix'
     parser.add_argument('--task', type=str, default='full', choices=['design', 'code', 'fix', 'full'],
                         help='任务类型: design(组合A), code(组合B), fix(组合C), full(完整流程)')
