@@ -1,0 +1,41 @@
+@startuml
+!theme plain
+
+title 基准测试系统架构
+
+package "数据准备层" {
+  [HumanEval 数据集] as HE
+  [convert_humaneval.py] as CONV
+  [需求文件\n(req_xxx.txt)] as REQ
+  [官方测试用例\n(eval_xxx.json)] as TEST
+  HE --> CONV : 下载+解析
+  CONV --> REQ : 生成
+  CONV --> TEST : 保存
+}
+
+package "测试执行层" {
+  [run_humaneval_benchmark.py] as RUNNER
+  [main.py\n(智能体)] as AGENT
+  RUNNER --> AGENT : subprocess调用
+  AGENT --> [代码生成] : LLM
+  [代码生成] --> [solution.py] : 保存
+}
+
+package "验证层" {
+  [evaluate_solution()] as EVAL
+  [solution.py] --> EVAL : 读取
+  [官方测试用例] --> EVAL : 加载
+  EVAL --> [测试报告] : 通过/失败
+}
+
+RUNNER --> EVAL : 触发验证
+
+note right of RUNNER
+  对每个题目：
+  1. 调用智能体
+  2. 收集生成代码
+  3. 官方测试验证
+  4. 统计通过率
+end note
+
+@enduml
