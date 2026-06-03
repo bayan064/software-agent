@@ -1,2 +1,0 @@
-写一个函数 longest_palindrome(s)，找出字符串中最长的回文子串
-例如：输入"babad"，返回"bab"或"aba"都可以

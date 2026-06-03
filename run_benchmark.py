@@ -10,11 +10,11 @@ print(f"项目根目录: {BASE_DIR}")
 print(f"使用Python: {VENV_PYTHON}")
 
 test_cases = [
-    ("两数之和", "tests/requirements/req_two_sum.txt"),
-    ("回文数", "tests/requirements/req_palindrome.txt"),
-    ("反转字符串", "tests/requirements/req_reverse_string.txt"),
-    ("字符串转整数", "tests/requirements/req_atoi.txt"),
-    ("最长回文子串", "tests/requirements/req_longest_palindrome.txt"),
+    ("有效的括号", "tests/requirements/req_valid_parentheses.txt"),      # Easy
+    ("三数之和", "tests/requirements/req_three_sum.txt"),                # Medium
+    ("合并K个有序链表", "tests/requirements/req_merge_k_lists.txt"),     # Hard
+    ("柱状图中最大的矩形", "tests/requirements/req_largest_rectangle.txt"), # Hard
+    ("滑动窗口最大值", "tests/requirements/req_sliding_window_max.txt"),  # Hard
 ]
 
 # 支持的语言
@@ -49,7 +49,8 @@ for language in languages:
                 cwd=BASE_DIR,
                 capture_output=True,
                 text=True,
-                timeout=120,
+                encoding="utf-8",
+                timeout=300,
                 env=os.environ.copy()
             )
             
@@ -72,7 +73,7 @@ for language in languages:
                 results.append((name, "❌ 失败"))
                 
         except subprocess.TimeoutExpired:
-            print(f"❌ 超时（120秒）")
+            print(f"❌ 超时（300秒）")
             results.append((name, "❌ 超时"))
         except Exception as e:
             print(f"❌ 异常: {e}")
