@@ -157,6 +157,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Node.js
+node_modules/
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -195,6 +198,10 @@ cython_debug/
 .abstra/
 
 # Visual Studio Code
+
+# Project-generated outputs
+output/
+extension/out/
 #   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
 #   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
 #   and can be added to the global gitignore or merged into this file. However, if you prefer, 
@@ -216,3 +223,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# 忽略下载的官方数据集
+HumanEval.jsonl.gz
+HumanEval.jsonl
+
+# 忽略自动生成的测试题和期望指标
+tests/requirements/req_humaneval_*
+tests/eval_references/eval_humaneval_*
+
+# 忽略智能体运行的输出结果
+benchmark_results/
