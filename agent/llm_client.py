@@ -1,16 +1,22 @@
 # agent/llm_client.py
 import os
 import re
-from zhipuai import ZhipuAI
+from openai import OpenAI
 
-print("我正在加载 llm_client.py，包名是 zhipuai")
+print("我正在加载 llm_client.py，包名是 DEEPSEEK_API")
 
 # 从环境变量读取API Key
-api_key = os.environ.get("ZHIPU_API_KEY")
+api_key = os.environ.get("DEEPSEEK_API_KEY")
 if not api_key:
-    raise ValueError("请设置环境变量 ZHIPU_API_KEY，例如：export ZHIPU_API_KEY='你的密钥'")
+    raise ValueError("请设置环境变量 DEEPSEEK_API_KEY，例如：export DEEPSEEK_API_KEY='你的密钥'")
 
-client = ZhipuAI(api_key=api_key)
+client = OpenAI(
+    api_key=os.environ.get("DEEPSEEK_API_KEY"),
+    base_url="https://api.deepseek.com"  # DeepSeek 的接口地址[citation:2][citation:8]
+)
+
+# Default to a supported DeepSeek model; allow override via env var.
+MODEL_NAME = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
 
 def _extract_function_name(code: str, language: str = "Python") -> str:
@@ -41,6 +47,66 @@ def _clean_code(raw: str) -> str:
     if lines and lines[-1].strip() == '```':
         lines = lines[:-1]
     return '\n'.join(lines).strip()
+
+
+def _strip_test_functions(code: str) -> str:
+    """移除意外混入的 pytest 测试函数"""
+    lines = code.splitlines()
+    cleaned = []
+    skipping = False
+    base_indent = 0
+
+    for line in lines:
+        if not skipping and re.match(r'^\s*def\s+test_\w+\s*\(', line):
+            skipping = True
+            base_indent = len(line) - len(line.lstrip())
+            continue
+
+        if skipping:
+            if line.strip() == "":
+                continue
+            current_indent = len(line) - len(line.lstrip())
+            if current_indent <= base_indent and re.match(r'^\s*(def|class)\s+', line):
+                skipping = False
+                cleaned.append(line)
+            else:
+                continue
+        else:
+            cleaned.append(line)
+
+    return "\n".join(cleaned).strip()
+
+
+def _strip_function_definition(code: str, func_name: str) -> str:
+    """移除测试代码里误写的实现函数"""
+    if not func_name:
+        return code
+
+    lines = code.splitlines()
+    cleaned = []
+    skipping = False
+    base_indent = 0
+    pattern = rf'^\s*def\s+{re.escape(func_name)}\s*\('
+
+    for line in lines:
+        if not skipping and re.match(pattern, line):
+            skipping = True
+            base_indent = len(line) - len(line.lstrip())
+            continue
+
+        if skipping:
+            if line.strip() == "":
+                continue
+            current_indent = len(line) - len(line.lstrip())
+            if current_indent <= base_indent and re.match(r'^\s*(def|class)\s+', line):
+                skipping = False
+                cleaned.append(line)
+            else:
+                continue
+        else:
+            cleaned.append(line)
+
+    return "\n".join(cleaned).strip()
 
 
 def _split_embedded_python_tests(code: str) -> tuple:
@@ -123,7 +189,7 @@ def generate_code_and_test(requirement: str, language: str = "Python") -> tuple:
 - 使用 public class Solution
 - 方法使用合适的访问修饰符
 - 不需要main方法
-- 绝对不要包含任何 import 语句
+- 允许并鼓励导入标准库（如 import java.util.*; import java.util.stream.*; 等），请将 import 写在类定义的最上方。
 
 【JUnit测试要求】
 - 测试类名为 TestSolution
@@ -166,7 +232,6 @@ public class TestSolution {{
 
 【重要】
 - 不要输出任何其他解释文字
-- 代码部分绝对不能包含 import 语句
 - 测试部分必须包含 import 和 static import
 
 请生成："""
@@ -200,7 +265,7 @@ def test_case_1():
 
 请生成："""
     response = client.chat.completions.create(
-        model="glm-4-flash",
+        model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3
     )
@@ -213,19 +278,19 @@ def test_case_1():
 
     code = _clean_code(code_match.group(1)) if code_match else ""
     test_code = _clean_code(test_match.group(1)) if test_match else ""
-
     if language == "Python":
+        code = _strip_test_functions(code)
         code, embedded_tests = _split_embedded_python_tests(code)
         if not test_code and embedded_tests:
             test_code = embedded_tests
-    # 确保 Java 测试代码包含必要的导入
+        if test_code:
+            func_name = _extract_function_name(code, language)
+            test_code = _strip_function_definition(test_code, func_name)
     if language == "Java" and test_code:
         test_code = _ensure_java_imports(test_code)
 
-    # 如果测试代码为空，尝试单独生成
     if code and not test_code:
         test_code = _generate_test_only(code, language)
-
     return code, test_code
 
 
@@ -260,7 +325,7 @@ def _generate_test_only(code: str, language: str = "Python") -> str:
 测试代码："""
     
     response = client.chat.completions.create(
-        model="glm-4-flash",
+        model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}]
     )
     test_code = _clean_code(response.choices[0].message.content)
@@ -291,9 +356,9 @@ def fix_code(code: str, error_log: str, test_code: str, requirement: str, langua
 {error_log}
 
 重要：
-1. 请只修复 Solution.java 中的代码
-2. 绝对不要在 Solution.java 中添加任何 import 语句
-3. 确保 Solution.java 中只有类定义
+1. 请只修复 Solution.java 中的代码。
+2. 如果错误日志显示 "cannot find symbol" 或缺少类型，请务必在 Solution.java 最上方添加相应的 import 语句（如 import java.util.*;）。
+3. 确保 Solution.java 中只有必要的 import 语句和类定义。
 
 要求：只输出修复后的完整 Solution.java 代码，不要有任何解释。
 
@@ -316,7 +381,7 @@ def fix_code(code: str, error_log: str, test_code: str, requirement: str, langua
 要求：只输出修复后的完整{language}代码，不要有任何解释。"""
     
     response = client.chat.completions.create(
-        model="glm-4-flash",
+        model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}]
     )
     return _clean_code(response.choices[0].message.content)
@@ -328,3 +393,95 @@ def generate_code(requirement: str, language: str = "Python") -> str:
     print("⚠️ 警告: generate_code 已废弃，请使用 generate_code_and_test")
     code, _ = generate_code_and_test(requirement, language)
     return code
+
+# ============================================================
+# 组合 A：分析 + 设计 核心实现
+# ============================================================
+
+def generate_design_models(requirement: str) -> dict:
+    """
+    根据需求自动生成系统分析与设计模型（包含类图和活动图/状态机图，采用 PlantUML 格式）
+    """
+    print("🤖 正在调用大模型生成设计模型...")
+    
+    prompt = f"""请根据以下用户需求/PRD，进行系统分析与设计，并输出对应的系统架构设计模型。
+
+【用户需求】
+{requirement}
+
+【严格要求】
+1. 你必须至少设计并输出两种图表：
+   - 类图 (Class Diagram)：展示系统的核心类、属性、方法以及类之间的关系（泛化、组合、聚合、关联等）。
+   - 活动图 (Activity Diagram) 或 状态机图 (State Machine Diagram)：展示核心业务流程或状态流转。
+2. 图表必须严格采用 **PlantUML** 语法编写。
+3. 请将图表放在指定的标记块中，不要有任何拖泥带水的解释。
+
+【活动图 PlantUML 语法要求 - 必须严格遵守】
+1. 每一行语句必须以英文分号 ; 结尾
+2. 分支必须写为: if (条件?) then (标签)
+3. 循环必须写为: while (条件) is (标签)
+4. 标签只能用英文或简单中文，不要有特殊符号
+5. 示例正确格式:
+   start
+   :读入数据;
+   if (x > 0?) then (是)
+     :处理正数;
+   else (否)
+     :处理负数;
+   endif
+   stop
+
+【输出格式 - 必须严格遵守】
+<<<CLASS_DIAGRAM>>>
+@startuml
+' 在此编写 PlantUML 类图代码
+@endum
+<<<CLASS_DIAGRAM_END>>>
+
+<<<ACTIVITY_DIAGRAM>>>
+@startuml
+' 在此编写 PlantUML 活动图或状态机图代码
+@endum
+<<<ACTIVITY_DIAGRAM_END>>>
+
+<<<TEXT_DESIGN>>>
+### 系统分析与设计说明
+（在此对系统整体架构、设计模式选择、核心模块职责进行简要的文字说明）
+<<<TEXT_DESIGN_END>>>
+"""
+
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    
+    content = response.choices[0].message.content
+    
+    # 提取类图
+    class_match = re.search(r'<<<CLASS_DIAGRAM>>>\s*(.*?)\s*<<<CLASS_DIAGRAM_END>>>', content, re.DOTALL)
+    class_diagram = class_match.group(1).strip() if class_match else ""
+    if not class_diagram and "@startuml" in content:
+        # 兜底：如果模型没写标签但写了 @startuml
+        puml_blocks = re.findall(r'(@startuml.*?@endum)', content, re.DOTALL)
+        if len(puml_blocks) > 0: class_diagram = puml_blocks[0]
+        
+    # 提取活动图/状态图
+    activity_match = re.search(r'<<<ACTIVITY_DIAGRAM>>>\s*(.*?)\s*<<<ACTIVITY_DIAGRAM_END>>>', content, re.DOTALL)
+    activity_diagram = activity_match.group(1).strip() if activity_match else ""
+    if not activity_diagram and "@startuml" in content:
+        puml_blocks = re.findall(r'(@startuml.*?@endum)', content, re.DOTALL)
+        if len(puml_blocks) > 1: activity_diagram = puml_blocks[1]
+        
+    # 提取设计说明文字
+    text_match = re.search(r'<<<TEXT_DESIGN>>>\s*(.*?)\s*<<<TEXT_DESIGN_END>>>', content, re.DOTALL)
+    text_design = text_match.group(1).strip() if text_match else "未生成文本说明。"
+
+    # 如果提取失败，进行二次清晰化清理
+    class_diagram = _clean_code(class_diagram)
+    activity_diagram = _clean_code(activity_diagram)
+
+    return {
+        "class_diagram": class_diagram,
+        "activity_diagram": activity_diagram,
+        "text_design": text_design
+    }
