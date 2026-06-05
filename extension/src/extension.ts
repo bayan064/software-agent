@@ -30,7 +30,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         const config = vscode.workspace.getConfiguration('agent-ui');
         const baseUrl = config.get<string>('baseUrl') ?? 'http://127.0.0.1:8000';
-        const timeoutMs = config.get<number>('timeoutMs') ?? 15000;
+        const timeoutMs = config.get<number>('timeoutMs') ?? 60000;
         const endpoint = new URL('/generate', baseUrl).toString();
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);

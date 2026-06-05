@@ -17,4 +17,4 @@ The extension calls `http://127.0.0.1:8000/generate` with a JSON body containing
 
 ## Settings
 - `agent-ui.baseUrl`: override the backend base URL if the service is not on `127.0.0.1:8000`.
-- `agent-ui.timeoutMs`: request timeout in milliseconds (default: 15000).
+- `agent-ui.timeoutMs`: request timeout in milliseconds (default: 60000).

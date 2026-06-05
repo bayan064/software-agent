@@ -46,7 +46,7 @@
         },
         "agent-ui.timeoutMs": {
           "type": "number",
-          "default": 15000,
+          "default": 60000,
           "minimum": 1000,
           "description": "Request timeout in milliseconds"
         }
