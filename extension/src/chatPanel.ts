@@ -19,18 +19,37 @@ interface DesignProposal {
     pending: boolean;
 }
 
+interface Conversation {
+    id: string;
+    title: string;
+    messages: Message[];
+    createdAt: Date;
+    updatedAt: Date;
+}
+
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'agent-ui.chatView';
     private _view?: vscode.WebviewView;
     private _messages: Message[] = [];
-    private _currentStreamingMessage = '';
+    private _conversations: Conversation[] = [];
+    private _currentConversationId: string = '';
     private _abortController?: AbortController;
     private _pendingDesignProposal?: DesignProposal;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
         private readonly _context: vscode.ExtensionContext
-    ) {}
+    ) {
+        // 加载保存的对话
+        this._loadConversations();
+        // 如果没有对话，创建一个新的
+        if (this._conversations.length === 0) {
+            this._createNewConversation();
+        } else {
+            this._currentConversationId = this._conversations[0].id;
+            this._messages = this._conversations[0].messages;
+        }
+    }
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
@@ -50,7 +69,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(async (data) => {
             switch (data.type) {
                 case 'sendMessage':
-                    await this._handleUserMessage(data.text);
+                    // 支持多个文件和文本一起发送
+                    await this._handleUserMessage(data.text, data.files);
+                    break;
+                case 'showWarning':
+                    vscode.window.showWarningMessage(data.message);
                     break;
                 case 'applyCode':
                     this._applyCodeToEditor(data.code);
@@ -70,11 +93,119 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                 case 'clearHistory':
                     this._clearHistory();
                     break;
+                case 'newConversation':
+                    this._createNewConversation();
+                    break;
+                case 'switchConversation':
+                    this._switchConversation(data.conversationId);
+                    break;
+                case 'deleteConversation': {
+                    const selection = await vscode.window.showWarningMessage(
+                        '确定要删除这个对话吗？',
+                        { modal: true },
+                        '确定'
+                    );
+                    if (selection === '确定') {
+                        this._deleteConversation(data.conversationId);
+                    }
+                    break;
+                }
             }
         });
 
         // 显示欢迎消息
         this._addSystemMessage('👋 欢迎使用 Agent UI！\n\n我可以帮助你生成代码、设计方案。请告诉我你的需求，例如：\n\n• "写一个计算器应用"\n• "实现用户登录功能"\n• "创建一个 RESTful API 服务"');
+    }
+
+    private _loadConversations() {
+        const saved = this._context.globalState.get<Conversation[]>('conversations');
+        if (saved) {
+            this._conversations = saved.map(conv => ({
+                ...conv,
+                createdAt: new Date(conv.createdAt),
+                updatedAt: new Date(conv.updatedAt)
+            }));
+        }
+    }
+
+    private _saveConversations() {
+        this._context.globalState.update('conversations', this._conversations);
+    }
+
+    private _createNewConversation(): string {
+        const id = Date.now().toString();
+        const newConv: Conversation = {
+            id: id,
+            title: '新对话',
+            messages: [],
+            createdAt: new Date(),
+            updatedAt: new Date()
+        };
+        this._conversations.unshift(newConv);
+        this._currentConversationId = id;
+        this._messages = newConv.messages;
+        this._saveConversations();
+        
+        // 更新侧边栏显示
+        this._updateConversationList();
+        return id;
+    }
+
+    private _switchConversation(id: string) {
+        const conv = this._conversations.find(c => c.id === id);
+        if (conv) {
+            this._currentConversationId = id;
+            this._messages = conv.messages; // 确保引用一致
+
+            // 【核心修改点】：切换对话时，立刻把该对话的历史消息发送给前端 Webview
+            this._view?.webview.postMessage({
+                type: 'loadConversation',
+                messages: conv.messages
+            });
+
+            // 同时也更新一下侧边栏列表的高亮状态
+            this._updateConversationList();
+        }
+    }
+
+    private _deleteConversation(conversationId: string) {
+        const index = this._conversations.findIndex(c => c.id === conversationId);
+        if (index === -1) return;
+        
+        this._conversations.splice(index, 1);
+        
+        if (this._conversations.length === 0) {
+            this._createNewConversation();
+            // 【修改点】：补充清空内存状态与前端视图的动作
+            this._messages = [];
+            this._view?.webview.postMessage({ type: 'clearMessages' });
+        } else if (this._currentConversationId === conversationId) {
+            this._switchConversation(this._conversations[0].id);
+        }
+        
+        this._saveConversations();
+        this._updateConversationList();
+    }
+
+    private _updateConversationTitle(conversationId: string, firstMessage: string) {
+        const conv = this._conversations.find(c => c.id === conversationId);
+        if (conv && conv.title === '新对话') {
+            // 截取前20个字符作为标题
+            conv.title = firstMessage.slice(0, 20) + (firstMessage.length > 20 ? '...' : '');
+            this._saveConversations();
+            this._updateConversationList();
+        }
+    }
+
+    private _updateConversationList() {
+        this._view?.webview.postMessage({
+            type: 'updateConversationList',
+            conversations: this._conversations.map(c => ({
+                id: c.id,
+                title: c.title,
+                isCurrent: c.id === this._currentConversationId
+            }))
+        });
     }
 
     private _getHtmlForWebview(webview: vscode.Webview): string {
@@ -130,11 +261,44 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         </html>`;
     }
 
-    private async _handleUserMessage(text: string) {
-        if (!text.trim()) return;
+    private async _handleUserMessage(text: string, files?: { name: string; content: string }[]) {
+        if (!text.trim() && (!files || files.length === 0)) return;
+
+        let fullRequirement = text || '';
+        let displayTitle = text || '';
+
+        // 【修改点】：拼接支持多个文件的内容，并将完整内容直接存入历史
+        if (files && files.length > 0) {
+            const filesText = files.map(f => `[文件: ${f.name}]\n\`\`\`\n${f.content}\n\`\`\``).join('\n\n');
+            fullRequirement = `${text ? text + '\n\n' : ''}${filesText}`;
+            if (!displayTitle) displayTitle = `上传了 ${files.length} 个文件`;
+        }
+
+        // 把包含文件的 fullRequirement 直接作为 content 存下来，这样历史记录就包含文件了
+        const userMessage: Message = { role: 'user', content: fullRequirement };
+        this._messages.push(userMessage);
+
+        const currentConv = this._conversations.find(c => c.id === this._currentConversationId);
+        
+        // 更新对话标题
+        if (currentConv && currentConv.messages.length === 1) {
+            this._updateConversationTitle(this._currentConversationId, displayTitle || text);
+        }
+
+        // 保存消息到对话
+        if (currentConv) {
+            currentConv.updatedAt = new Date();
+            this._saveConversations();
+        }
+
+        // 发送给 UI 显示
+        this._view?.webview.postMessage({
+            type: 'addMessage',
+            message: { role: userMessage.role, content: userMessage.content }
+        });
 
         // 开始流式响应
-        await this._streamResponse(text);
+        await this._streamResponse(fullRequirement);
     }
 
     private async _streamResponse(requirement: string) {
@@ -153,11 +317,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         this._messages.push(assistantMessage);
         const messageId = this._addStreamingMessageToView();
 
+        // 构建历史消息（只发送 user 和 assistant 的消息，不含 system）
+        const history = this._messages
+            .filter(m => m.role === 'user' || m.role === 'assistant')
+            .slice(0, -1) // 不包括刚添加的这条 assistant 消息
+            .map(m => ({ role: m.role, content: m.content }));
+            
         try {
             const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ requirement }),
+                body: JSON.stringify({ requirement, history }),
                 signal: this._abortController.signal
             });
 
@@ -393,11 +563,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
 
     private _finalizeStreamingMessage(id: string, content: string) {
+        // 保存 assistant 消息
+        const assistantMessage: Message = { role: 'assistant', content: content };
+        const currentConv = this._conversations.find(c => c.id === this._currentConversationId);
+        if (currentConv) {
+            currentConv.updatedAt = new Date();
+            this._saveConversations();
+        }
+
         this._view?.webview.postMessage({
             type: 'finalizeStreamingMessage',
             id,
             content
         });
+        this._showCancelButton(false);
     }
 
     private _showCancelButton(show: boolean) {

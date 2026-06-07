@@ -1,23 +1,7 @@
 // software-agent/extension/media/chat.js
 
 let streamingMessageElement = null;
-
-// 发送消息
-function sendMessage() {
-    const text = userInput.value.trim();
-    if (!text) return;
-
-    // 只添加一次用户消息到界面
-    addMessageToUI('user', text);
-    
-    // 清空输入框
-    userInput.value = '';
-    userInput.style.height = 'auto';
-    
-    // 发送到扩展（后端不会再返回用户消息）
-    vscode.postMessage({ type: 'sendMessage', text });
-    showCancelButton(true);
-}
+let conversationsListVisible = false;
 
 // 添加消息到UI
 function addMessageToUI(role, content) {
@@ -26,7 +10,12 @@ function addMessageToUI(role, content) {
     
     const contentDiv = document.createElement('div');
     contentDiv.className = 'message-content';
-    contentDiv.textContent = content;
+    // 检测是否是代码（包含 def/class/import 或缩进特征）
+    if (role === 'assistant' && (content.includes('def ') || content.includes('class ') || content.includes('import ') || content.includes('    '))) {
+        contentDiv.innerHTML = `<pre><code class="language-python">${escapeHtml(content)}</code></pre>`;
+    } else {
+        contentDiv.textContent = content;
+    }
     
     messageDiv.appendChild(contentDiv);
     messagesContainer.appendChild(messageDiv);
@@ -56,8 +45,8 @@ function updateStreamingMessage(id, content, isCode) {
     if (!messageDiv) return;
     
     const contentDiv = messageDiv.querySelector('.message-content');
-    if (isCode) {
-        contentDiv.innerHTML = `<pre><code>${escapeHtml(content)}</code></pre>`;
+    if (isCode || content.includes('def ') || content.includes('class ')) {
+        contentDiv.innerHTML = `<pre><code class="language-python">${escapeHtml(content)}</code></pre>`;
     } else {
         contentDiv.innerHTML = formatMarkdown(content);
     }
@@ -72,7 +61,14 @@ function finalizeStreamingMessage(id, content) {
     
     messageDiv.classList.remove('streaming');
     const contentDiv = messageDiv.querySelector('.message-content');
-    contentDiv.innerHTML = formatMarkdown(content);
+    // 最终确定时也检测代码
+    if (content.includes('def ') || content.includes('class ') || content.includes('import ')) {
+        contentDiv.innerHTML = `<pre><code class="language-python">${escapeHtml(content)}</code></pre>`;
+    } else {
+        contentDiv.innerHTML = formatMarkdown(content);
+    }
+    
+    scrollToBottom();
 }
 
 // 显示设计方案
@@ -181,5 +177,220 @@ window.addEventListener('message', event => {
         case 'showCancelButton':
             showCancelButton(message.show);
             break;
+        case 'loadConversation':
+        if (message.messages) {
+            loadConversation(message.messages);
+        }
+        break;
+        case 'updateConversationList':
+            updateConversationList(message.conversations, message.currentId);
+            break;
     }
 });
+
+let pendingFiles = [];
+
+function addFileUploadUI() {
+    const inputContainer = document.querySelector('.input-container');
+    const textarea = document.getElementById('userInput');
+    
+    const fileBar = document.createElement('div');
+    fileBar.className = 'file-upload-bar';
+    fileBar.innerHTML = `
+        <button id="uploadFileBtn" class="file-btn" title="上传文件">📎</button>
+        <span id="fileNameDisplay" class="file-name-display"></span>
+        <button id="clearFileBtn" class="clear-file-btn" style="display:none;" title="移除文件">✖</button>
+    `;
+    
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.id = 'fileInput';
+    fileInput.style.display = 'none';
+    fileInput.multiple = true; // 【修改点】：允许选择多个文件
+    fileInput.accept = '.txt,.py,.java,.js,.ts,.json,.md,.csv';
+    
+    inputContainer.insertBefore(fileBar, textarea);
+    inputContainer.appendChild(fileInput);
+    
+    document.getElementById('uploadFileBtn').addEventListener('click', () => { fileInput.click(); });
+    document.getElementById('clearFileBtn').addEventListener('click', () => { clearSelectedFile(); });
+    fileInput.addEventListener('change', handleFileSelect);
+}
+
+// 【修改点】：循环处理多个文件
+async function handleFileSelect(event) {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (file.size > 1024 * 1024) {
+            vscode.postMessage({ type: 'showWarning', message: `文件 ${file.name} 超过 1MB` });
+            continue;
+        }
+        
+        await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                pendingFiles.push({
+                    name: file.name,
+                    content: e.target.result,
+                    size: file.size
+                });
+                addMessageToUI('system', `📎 已添加文件: ${file.name} (${(file.size/1024).toFixed(1)} KB)`);
+                resolve();
+            };
+            reader.readAsText(file, 'UTF-8');
+        });
+    }
+    
+    const fileNameDisplay = document.getElementById('fileNameDisplay');
+    const clearBtn = document.getElementById('clearFileBtn');
+    fileNameDisplay.textContent = `📎 已选择 ${pendingFiles.length} 个文件`;
+    clearBtn.style.display = 'inline-block';
+}
+
+function clearSelectedFile() {
+    pendingFiles = []; // 【修改点】：清空数组
+    const fileNameDisplay = document.getElementById('fileNameDisplay');
+    const clearBtn = document.getElementById('clearFileBtn');
+    const fileInput = document.getElementById('fileInput');
+    
+    fileNameDisplay.textContent = '';
+    clearBtn.style.display = 'none';
+    if (fileInput) fileInput.value = '';
+}
+
+function sendMessage() {
+    const text = userInput.value.trim();
+    
+    if (!text && pendingFiles.length === 0) return;
+    
+    // 【修改点】：删除了这里主动调用的 addMessageToUI('user', ...)，全权交由后端确认后再返回渲染指令
+    
+    userInput.value = '';
+    userInput.style.height = 'auto';
+    
+    vscode.postMessage({ 
+        type: 'sendMessage', 
+        text: text || '',
+        files: pendingFiles.length > 0 ? pendingFiles : [] // 【修改点】：传出数组
+    });
+    
+    showCancelButton(true);
+    clearSelectedFile();
+}
+
+// 初始化时添加上传UI
+window.addEventListener('DOMContentLoaded', () => {
+    addFileUploadUI();
+});
+
+function initConversationSidebar() {
+    // 创建侧边栏按钮
+    const header = document.querySelector('.chat-header');
+    const newChatBtn = document.createElement('button');
+    newChatBtn.className = 'icon-btn';
+    newChatBtn.innerHTML = '➕';
+    newChatBtn.title = '新对话';
+    newChatBtn.onclick = () => vscode.postMessage({ type: 'newConversation' });
+    header.appendChild(newChatBtn);
+    
+    // 创建对话列表侧边栏
+    const sidebar = document.createElement('div');
+    sidebar.id = 'conversationSidebar';
+    sidebar.className = 'conversation-sidebar';
+    sidebar.innerHTML = `
+        <div class="sidebar-header">
+            <span>对话历史</span>
+            <button id="closeSidebarBtn" class="icon-btn">✖</button>
+        </div>
+        <div id="conversationList" class="conversation-list"></div>
+    `;
+    
+    document.body.insertBefore(sidebar, document.querySelector('.chat-container'));
+    
+    // 添加侧边栏切换按钮
+    const toggleSidebarBtn = document.createElement('button');
+    toggleSidebarBtn.className = 'icon-btn';
+    toggleSidebarBtn.innerHTML = '☰';
+    toggleSidebarBtn.title = '对话历史';
+    toggleSidebarBtn.onclick = () => toggleConversationSidebar();
+    header.insertBefore(toggleSidebarBtn, header.firstChild);
+    
+    // 关闭按钮事件
+    document.getElementById('closeSidebarBtn')?.addEventListener('click', () => {
+        toggleConversationSidebar(false);
+    });
+}
+
+function toggleConversationSidebar(show) {
+    const sidebar = document.getElementById('conversationSidebar');
+    if (sidebar) {
+        conversationsListVisible = show !== undefined ? show : !conversationsListVisible;
+        sidebar.classList.toggle('visible', conversationsListVisible);
+    }
+}
+
+function updateConversationList(conversations) {
+    const container = document.getElementById('conversationList');
+    if (!container) return;
+    
+    container.innerHTML = conversations.map(conv => `
+        <div class="conversation-item ${conv.isCurrent ? 'current' : ''}" 
+             data-id="${conv.id}">
+            <span class="conversation-title">${escapeHtml(conv.title)}</span>
+            <button class="delete-conv-btn" data-id="${conv.id}" title="删除">🗑️</button>
+        </div>
+    `).join('');
+    
+    // 绑定点击事件
+    container.querySelectorAll('.conversation-item').forEach(item => {
+        const id = item.dataset.id;
+        item.addEventListener('click', (e) => {
+            if (!e.target.classList.contains('delete-conv-btn')) {
+                vscode.postMessage({ type: 'switchConversation', conversationId: id });
+                toggleConversationSidebar(false);
+            }
+        });
+        
+        const deleteBtn = item.querySelector('.delete-conv-btn');
+        deleteBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // 直接向后端发送删除指令
+            vscode.postMessage({ type: 'deleteConversation', conversationId: id });
+        });
+    });
+}
+
+function loadConversation(messages) {
+    // 清空消息容器
+    messagesContainer.innerHTML = '';
+    
+    // 重新加载所有消息
+    messages.forEach(msg => {
+        addMessageToUI(msg.role, msg.content);
+    });
+    
+    scrollToBottom();
+}
+
+// 修改消息监听
+window.addEventListener('message', event => {
+    const message = event.data;
+    switch (message.type) {
+        // ... 现有 case
+        case 'updateConversationList':
+            updateConversationList(message.conversations);
+            break;
+        case 'loadConversation':
+            loadConversation(message.messages);
+            break;
+        case 'clearMessages':
+            messagesContainer.innerHTML = '';
+            break;
+    }
+});
+
+// 初始化
+initConversationSidebar();

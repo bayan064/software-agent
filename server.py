@@ -11,36 +11,49 @@ api = FastAPI()
 
 class Request(BaseModel):
     requirement: str
+    history: List[Dict[str, str]] = []  # 新增历史消息字段
 
 class DesignRequest(BaseModel):
     design: dict  # 新增
 
-async def stream_response(requirement: str):
-    """流式响应生成器"""
-    # 直接调用 agent 获取代码和测试
+async def stream_response(requirement: str, history: List[Dict[str, str]] = []):
+    """流式响应生成器，支持历史对话"""
+    
+    # 构建包含历史的完整需求
+    full_requirement = requirement
+    
+    # 如果有历史对话，添加到上下文中
+    if history:
+        context = "\n\n【历史对话】\n"
+        for msg in history:
+            role = "用户" if msg["role"] == "user" else "助手"
+            context += f"{role}: {msg['content']}\n"
+        full_requirement = context + f"\n【当前问题】\n{requirement}"
+    
+    # 调用 agent
     result = app.invoke({
         "messages": [],
         "steps": 0,
         "code": "",
         "test_code": "",
         "test_result": {},
-        "requirement": requirement
+        "requirement": full_requirement
     })
     
     code = result.get("code", "")
+    
     # 流式输出代码
     for char in code:
         yield f"data: {json.dumps({'type': 'code_chunk', 'content': char, 'isCode': True})}\n\n"
         await asyncio.sleep(0.01)
     
-    # 完成信号
     yield f"data: {json.dumps({'type': 'complete', 'code': code})}\n\n"
     yield "data: [DONE]\n\n"
 
 @api.post("/stream")
 async def stream_generate(request: Request):
     return StreamingResponse(
-        stream_response(request.requirement),
+        stream_response(request.requirement, request.history),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
