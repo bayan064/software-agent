@@ -1,0 +1,281 @@
+/* software-agent/extension/media/chat.css */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: var(--vscode-font-family);
+    font-size: var(--vscode-font-size);
+    color: var(--vscode-foreground);
+    background-color: var(--vscode-sideBar-background);
+    height: 100vh;
+    overflow: hidden;
+}
+
+.chat-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.chat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    background-color: var(--vscode-sideBarTitle-background);
+}
+
+.chat-header h3 {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.icon-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 18px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    color: var(--vscode-foreground);
+}
+
+.icon-btn:hover {
+    background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.messages-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.user-message,
+.assistant-message,
+.system-message {
+    display: flex;
+    animation: fadeIn 0.3s ease-in;
+}
+
+.user-message {
+    justify-content: flex-end;
+}
+
+.user-message .message-content {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    padding: 8px 12px;
+    border-radius: 12px;
+    max-width: 85%;
+    word-wrap: break-word;
+}
+
+.assistant-message .message-content,
+.system-message .message-content {
+    background-color: var(--vscode-editor-background);
+    padding: 8px 12px;
+    border-radius: 12px;
+    max-width: 85%;
+    word-wrap: break-word;
+    border: 1px solid var(--vscode-panel-border);
+}
+
+.system-message .message-content {
+    font-style: italic;
+    font-size: 12px;
+    background-color: var(--vscode-statusBar-debuggingBackground);
+}
+
+.message-content pre {
+    background-color: var(--vscode-textCodeBlock-background);
+    padding: 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 8px 0;
+}
+
+.message-content code {
+    font-family: var(--vscode-editor-font-family);
+    font-size: 12px;
+}
+
+.message-content .typing-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.message-content .typing-indicator span {
+    animation: blink 1.4s infinite;
+    animation-fill-mode: both;
+}
+
+.message-content .typing-indicator span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.message-content .typing-indicator span:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes blink {
+    0%, 60%, 100% { opacity: 0; }
+    30% { opacity: 1; }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 设计提案样式 */
+.design-proposal {
+    background-color: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-focusBorder);
+    border-radius: 8px;
+    padding: 12px;
+    margin: 8px 0;
+}
+
+.proposal-title {
+    font-size: 16px;
+    font-weight: bold;
+    margin-bottom: 8px;
+    color: var(--vscode-terminal-ansi-cyan);
+}
+
+.proposal-description {
+    margin-bottom: 12px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.proposal-architecture {
+    margin-bottom: 12px;
+}
+
+.proposal-architecture pre {
+    background-color: var(--vscode-textCodeBlock-background);
+    padding: 8px;
+    border-radius: 4px;
+    margin-top: 4px;
+}
+
+.proposal-components ul {
+    margin: 4px 0 12px 20px;
+}
+
+.proposal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.approve-btn,
+.reject-btn,
+.apply-code-btn {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.approve-btn {
+    background-color: var(--vscode-terminal-ansi-green);
+    color: white;
+}
+
+.reject-btn {
+    background-color: var(--vscode-terminal-ansi-red);
+    color: white;
+}
+
+.apply-code-btn {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    margin-top: 8px;
+}
+
+.input-container {
+    padding: 12px 16px;
+    border-top: 1px solid var(--vscode-panel-border);
+    background-color: var(--vscode-sideBar-background);
+}
+
+#userInput {
+    width: 100%;
+    background-color: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 6px;
+    padding: 8px;
+    font-family: inherit;
+    font-size: 13px;
+    resize: vertical;
+}
+
+#userInput:focus {
+    outline: none;
+    border-color: var(--vscode-focusBorder);
+}
+
+.input-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.primary-btn,
+.secondary-btn {
+    padding: 6px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.primary-btn {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.primary-btn:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+.secondary-btn {
+    background-color: var(--vscode-secondaryButton-background);
+    color: var(--vscode-secondaryButton-foreground);
+}
+
+.secondary-btn:hover {
+    background-color: var(--vscode-secondaryButton-hoverBackground);
+}
+
+/* 滚动条样式 */
+.messages-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+.messages-container::-webkit-scrollbar-track {
+    background: var(--vscode-scrollbarSlider-background);
+}
+
+.messages-container::-webkit-scrollbar-thumb {
+    background: var(--vscode-scrollbarSlider-hoverBackground);
+    border-radius: 4px;
+}

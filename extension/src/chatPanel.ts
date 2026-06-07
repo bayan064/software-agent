@@ -1,0 +1,418 @@
+// software-agent/extension/src/chatPanel.ts
+import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
+
+interface Message {
+    role: 'user' | 'assistant' | 'system';
+    content: string;
+    code?: string;
+    isStreaming?: boolean;
+    designProposal?: DesignProposal;
+}
+
+interface DesignProposal {
+    title: string;
+    description: string;
+    architecture: string;
+    components: string[];
+    pending: boolean;
+}
+
+export class ChatPanelProvider implements vscode.WebviewViewProvider {
+    public static readonly viewType = 'agent-ui.chatView';
+    private _view?: vscode.WebviewView;
+    private _messages: Message[] = [];
+    private _currentStreamingMessage = '';
+    private _abortController?: AbortController;
+    private _pendingDesignProposal?: DesignProposal;
+
+    constructor(
+        private readonly _extensionUri: vscode.Uri,
+        private readonly _context: vscode.ExtensionContext
+    ) {}
+
+    public resolveWebviewView(
+        webviewView: vscode.WebviewView,
+        context: vscode.WebviewViewResolveContext,
+        _token: vscode.CancellationToken,
+    ) {
+        this._view = webviewView;
+
+        webviewView.webview.options = {
+            enableScripts: true,
+            localResourceRoots: [this._extensionUri]
+        };
+
+        webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
+
+        // 处理来自 Webview 的消息
+        webviewView.webview.onDidReceiveMessage(async (data) => {
+            switch (data.type) {
+                case 'sendMessage':
+                    await this._handleUserMessage(data.text);
+                    break;
+                case 'applyCode':
+                    this._applyCodeToEditor(data.code);
+                    break;
+                case 'approveDesign':
+                    await this._handleDesignApproval(true);
+                    break;
+                case 'rejectDesign':
+                    await this._handleDesignApproval(false);
+                    break;
+                case 'cancelGeneration':
+                    this._cancelGeneration();
+                    break;
+                case 'retry':
+                    await this._retryLastMessage();
+                    break;
+                case 'clearHistory':
+                    this._clearHistory();
+                    break;
+            }
+        });
+
+        // 显示欢迎消息
+        this._addSystemMessage('👋 欢迎使用 Agent UI！\n\n我可以帮助你生成代码、设计方案。请告诉我你的需求，例如：\n\n• "写一个计算器应用"\n• "实现用户登录功能"\n• "创建一个 RESTful API 服务"');
+    }
+
+    private _getHtmlForWebview(webview: vscode.Webview): string {
+        // 读取 CSS 和 JS 文件
+        const cssPath = path.join(this._extensionUri.fsPath, 'media', 'chat.css');
+        const jsPath = path.join(this._extensionUri.fsPath, 'media', 'chat.js');
+        
+        let cssContent = '';
+        let jsContent = '';
+        
+        try {
+            cssContent = fs.readFileSync(cssPath, 'utf8');
+            jsContent = fs.readFileSync(jsPath, 'utf8');
+        } catch (error) {
+            console.error('Failed to read media files:', error);
+        }
+
+        return `<!DOCTYPE html>
+        <html lang="zh-CN">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'unsafe-inline';">
+            <style>${cssContent}</style>
+            <title>Agent UI Chat</title>
+        </head>
+        <body>
+            <div class="chat-container">
+                <div class="chat-header">
+                    <h3>🤖 Agent UI Assistant</h3>
+                    <button id="clearHistoryBtn" class="icon-btn" title="清空历史">🗑️</button>
+                </div>
+                <div class="messages-container" id="messagesContainer">
+                    <div class="welcome-message">
+                        <div class="assistant-message">
+                            <div class="message-content">👋 欢迎使用 Agent UI！</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="input-container">
+                    <textarea id="userInput" placeholder="输入你的需求..." rows="3"></textarea>
+                    <div class="input-actions">
+                        <button id="sendBtn" class="primary-btn">发送</button>
+                        <button id="cancelBtn" class="secondary-btn" style="display:none;">取消</button>
+                    </div>
+                </div>
+            </div>
+            <script>
+                const vscode = acquireVsCodeApi();
+                ${jsContent}
+            </script>
+        </body>
+        </html>`;
+    }
+
+    private async _handleUserMessage(text: string) {
+        if (!text.trim()) return;
+
+        // 开始流式响应
+        await this._streamResponse(text);
+    }
+
+    private async _streamResponse(requirement: string) {
+        const config = vscode.workspace.getConfiguration('agent-ui');
+        const baseUrl = config.get<string>('baseUrl') ?? 'http://127.0.0.1:8000';
+        const endpoint = new URL('/stream', baseUrl).toString();
+
+        this._abortController = new AbortController();
+        
+        // 创建流式消息占位符
+        const assistantMessage: Message = {
+            role: 'assistant',
+            content: '',
+            isStreaming: true
+        };
+        this._messages.push(assistantMessage);
+        const messageId = this._addStreamingMessageToView();
+
+        try {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ requirement }),
+                signal: this._abortController.signal
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+
+            if (!reader) throw new Error('No response body');
+
+            let buffer = '';
+            let fullContent = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = line.slice(6);
+                        if (data === '[DONE]') continue;
+                        
+                        try {
+                            const parsed = JSON.parse(data);
+                            
+                            // 处理不同类型的响应
+                            if (parsed.type === 'design_proposal') {
+                                // 收到设计方案，请求用户确认
+                                const proposal: DesignProposal = {
+                                    title: parsed.title,
+                                    description: parsed.description,
+                                    architecture: parsed.architecture,
+                                    components: parsed.components,
+                                    pending: true
+                                };
+                                this._pendingDesignProposal = proposal;
+                                this._showDesignProposal(proposal, messageId);
+                            } else if (parsed.type === 'code_chunk') {
+                                // 流式输出代码
+                                fullContent += parsed.content;
+                                this._updateStreamingMessage(messageId, fullContent, parsed.isCode);
+                            } else if (parsed.type === 'complete') {
+                                // 完成
+                                assistantMessage.content = fullContent;
+                                assistantMessage.isStreaming = false;
+                                if (parsed.code) {
+                                    assistantMessage.code = parsed.code;
+                                }
+                                this._finalizeStreamingMessage(messageId, fullContent);
+                            }
+                        } catch (e) {
+                            console.error('Parse error:', e);
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                this._updateStreamingMessage(messageId, '\n\n❌ 生成已取消', false);
+            } else {
+                const errorMsg = `❌ 错误: ${error instanceof Error ? error.message : String(error)}`;
+                this._updateStreamingMessage(messageId, errorMsg, false);
+            }
+            assistantMessage.isStreaming = false;
+        } finally {
+            this._abortController = undefined;
+            this._showCancelButton(false);
+        }
+    }
+
+    private _showDesignProposal(proposal: DesignProposal, messageId: string) {
+        const proposalHtml = `
+            <div class="design-proposal">
+                <div class="proposal-title">📐 ${this._escapeHtml(proposal.title)}</div>
+                <div class="proposal-description">${this._escapeHtml(proposal.description)}</div>
+                <div class="proposal-architecture">
+                    <strong>架构设计：</strong>
+                    <pre>${this._escapeHtml(proposal.architecture)}</pre>
+                </div>
+                <div class="proposal-components">
+                    <strong>组件：</strong>
+                    <ul>${proposal.components.map(c => `<li>${this._escapeHtml(c)}</li>`).join('')}</ul>
+                </div>
+                <div class="proposal-actions">
+                    <button class="approve-btn" onclick="vscode.postMessage({type:'approveDesign'})">✅ 确认采用</button>
+                    <button class="reject-btn" onclick="vscode.postMessage({type:'rejectDesign'})">❌ 重新设计</button>
+                </div>
+            </div>
+        `;
+        
+        this._view?.webview.postMessage({
+            type: 'showDesignProposal',
+            messageId,
+            content: proposalHtml
+        });
+    }
+
+    private async _handleDesignApproval(approved: boolean) {
+        if (!this._pendingDesignProposal) return;
+
+        if (approved) {
+            // 用户确认，继续生成代码
+            await this._continueWithDesign(this._pendingDesignProposal);
+        } else {
+            // 用户拒绝，让用户提供修改意见
+            const feedback = await vscode.window.showInputBox({
+                prompt: '请说明需要如何修改设计方案',
+                placeHolder: '例如：应该使用 MVC 架构，而不是...'
+            });
+            if (feedback) {
+                await this._streamResponse(`修改设计方案：${feedback}\n原需求：${this._messages[this._messages.length - 2]?.content}`);
+            }
+        }
+        this._pendingDesignProposal = undefined;
+    }
+
+    private async _continueWithDesign(proposal: DesignProposal) {
+        this._addSystemMessage('✅ 设计方案已确认，正在生成代码...');
+        
+        // 继续流式生成代码
+        const config = vscode.workspace.getConfiguration('agent-ui');
+        const baseUrl = config.get<string>('baseUrl') ?? 'http://127.0.0.1:8000';
+        const endpoint = new URL('/generate-code', baseUrl).toString();
+
+        try {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ design: proposal })
+            });
+
+            const data = await response.json();
+            if (data.code) {
+                this._showCodeWithApplyButton(data.code);
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`生成代码失败: ${error}`);
+        }
+    }
+
+    private _showCodeWithApplyButton(code: string) {
+        const assistantMessage: Message = {
+            role: 'assistant',
+            content: '代码已生成：',
+            code: code
+        };
+        this._messages.push(assistantMessage);
+        
+        const codeHtml = `
+            <div class="code-block">
+                <pre><code>${this._escapeHtml(code)}</code></pre>
+                <button class="apply-code-btn" onclick="vscode.postMessage({type:'applyCode', code: ${JSON.stringify(code)}})">📋 应用到编辑器</button>
+            </div>
+        `;
+        
+        this._view?.webview.postMessage({
+            type: 'addMessage',
+            message: { role: 'assistant', content: codeHtml }
+        });
+    }
+
+    private _applyCodeToEditor(code: string) {
+        const editor = vscode.window.activeTextEditor;
+        if (editor) {
+            editor.edit(editBuilder => {
+                const selection = editor.selection;
+                editBuilder.replace(selection, code);
+            });
+            vscode.window.showInformationMessage('代码已应用到编辑器');
+        } else {
+            // 如果没有活动编辑器，创建新文件
+            vscode.workspace.openTextDocument({ content: code, language: 'python' }).then(doc => {
+                vscode.window.showTextDocument(doc);
+            });
+        }
+    }
+
+    private _cancelGeneration() {
+        if (this._abortController) {
+            this._abortController.abort();
+            this._abortController = undefined;
+        }
+    }
+
+    private async _retryLastMessage() {
+        const lastUserMessage = [...this._messages].reverse().find(m => m.role === 'user');
+        if (lastUserMessage) {
+            await this._streamResponse(lastUserMessage.content);
+        }
+    }
+
+    private _clearHistory() {
+        this._messages = [];
+        this._view?.webview.postMessage({ type: 'clearMessages' });
+        this._addSystemMessage('历史记录已清空');
+    }
+
+    private _addMessageToView(message: Message) {
+        this._view?.webview.postMessage({
+            type: 'addMessage',
+            message: { role: message.role, content: message.content }
+        });
+    }
+
+    private _addSystemMessage(content: string) {
+        const systemMessage: Message = { role: 'system', content };
+        this._messages.push(systemMessage);
+        this._addMessageToView(systemMessage);
+    }
+
+    private _addStreamingMessageToView(): string {
+        const id = Date.now().toString();
+        this._view?.webview.postMessage({
+            type: 'addStreamingMessage',
+            id
+        });
+        return id;
+    }
+
+    private _updateStreamingMessage(id: string, content: string, isCode: boolean = false) {
+        this._view?.webview.postMessage({
+            type: 'updateStreamingMessage',
+            id,
+            content,
+            isCode
+        });
+    }
+
+    private _finalizeStreamingMessage(id: string, content: string) {
+        this._view?.webview.postMessage({
+            type: 'finalizeStreamingMessage',
+            id,
+            content
+        });
+    }
+
+    private _showCancelButton(show: boolean) {
+        this._view?.webview.postMessage({
+            type: 'showCancelButton',
+            show
+        });
+    }
+
+    private _escapeHtml(text: string): string {
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+}
