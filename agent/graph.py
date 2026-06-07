@@ -73,39 +73,107 @@ def generate_design_node(state: AgentState) -> dict:
     }
 
 
+import os
+
 def generate_code_node(state: AgentState) -> dict:
-    """组合 B：生成代码节点"""
+    """组合 B：根据设计模型生成代码节点
+    
+    支持两种输入模式：
+    1. 场景一（组合A->B联调）：从 state["design_models"] 中读取组合 A 生成的内存数据。
+    2. 场景二（独立测试）：当 state["requirement"] 传入的是一个本地文件夹路径时，
+                           自动扫描并读取该文件夹下的 UML 文件（.puml / .md）作为输入。
+    """
     print("🟡 生成代码节点被调用")
     
-    requirement = state.get("requirement", "")
+    raw_requirement = state.get("requirement", "").strip()
     output_dir = state.get("output_dir", "output")
     language = state.get("language", "Python")
-    if not requirement:
+    
+    # 兜底旧逻辑：如果 requirement 为空，尝试从 messages 恢复
+    if not raw_requirement:
         for msg in state.get("messages", []):
             if msg.startswith("需求:"):
-                requirement = msg.replace("需求:", "").strip()
+                raw_requirement = msg.replace("需求:", "").strip()
                 break
+                
+    compiled_context = ""
     
-    if "文档" in requirement:
-        doc_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "test_cases.md")
-        try:
-            with open(doc_path, "r", encoding="utf-8") as f:
-                doc_content = f.read().strip()
-            if doc_content:
-                requirement = f"{requirement}\n\n【文档内容】\n{doc_content}"
-        except OSError:
-            print("⚠️ 未能读取 docs/test_cases.md，按原需求继续")
+    # =========================================================================
+    # 核心改动：支持【场景二】单独在 test/requirement 中读取本地文件夹下的 UML 文件
+    # =========================================================================
+    if os.path.isdir(raw_requirement):
+        input_dir = raw_requirement
+        print(f"📂 检测到 requirement 为本地目录，正在从 {input_dir} 加载 UML 设计图与文档进行独立测试...")
+        compiled_context += "【从测试目录读取到的设计模型与 UML】:\n"
+        
+        # 1. 读取总体架构设计说明
+        md_path = os.path.join(input_dir, "system_design.md")
+        if os.path.exists(md_path):
+            try:
+                with open(md_path, "r", encoding="utf-8") as f:
+                    compiled_context += f"\n- 架构设计说明报告:\n{f.read().strip()}\n"
+            except OSError as e:
+                print(f"⚠️ 读取 system_design.md 失败: {e}")
+                
+        # 2. 读取 PlantUML 类图
+        class_puml = os.path.join(input_dir, "class_diagram.puml")
+        if os.path.exists(class_puml):
+            try:
+                with open(class_puml, "r", encoding="utf-8") as f:
+                    compiled_context += f"\n- 类图结构 (PlantUML):\n```puml\n{f.read().strip()}\n```\n"
+            except OSError as e:
+                print(f"⚠️ 读取 class_diagram.puml 失败: {e}")
+                
+        # 3. 读取 PlantUML 业务流程/活动图
+        activity_puml = os.path.join(input_dir, "activity_diagram.puml")
+        if os.path.exists(activity_puml):
+            try:
+                with open(activity_puml, "r", encoding="utf-8") as f:
+                    compiled_context += f"\n- 业务活动图/流程图 (PlantUML):\n```puml\n{f.read().strip()}\n```\n"
+            except OSError as e:
+                print(f"⚠️ 读取 activity_diagram.puml 失败: {e}")
 
-    print(f"📝 需求: {requirement[:100]}...")
+        # 如果是个目录，但里面啥模型都没有，就把目录名或者原本的提示作为基础
+        final_prompt = compiled_context if len(compiled_context) > 30 else f"基于该模块的设计模型生成代码。目标目录: {input_dir}"
+        
+    else:
+        # =========================================================================
+        # 保留并增强【场景一】联调逻辑（接收组合A传过来的内存字典数据）
+        # =========================================================================
+        final_prompt = raw_requirement
+        
+        # 兼容你原有的 docs/test_cases.md 读取逻辑
+        if "文档" in final_prompt:
+            doc_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "test_cases.md")
+            try:
+                with open(doc_path, "r", encoding="utf-8") as f:
+                    doc_content = f.read().strip()
+                if doc_content:
+                    final_prompt = f"{final_prompt}\n\n【文档内容】\n{doc_content}"
+            except OSError:
+                print("⚠️ 未能读取 docs/test_cases.md，按原需求继续")
+                
+        # 从组合 A 传递的内存字典中提取更完整的 UML 数据
+        design_models = state.get("design_models", {})
+        if design_models:
+            added_context = ""
+            if design_models.get("text_design"):
+                added_context += f"\n【参考架构设计说明】:\n{design_models.get('text_design')}\n"
+            if design_models.get("class_diagram"):
+                added_context += f"\n【类图定义 (PlantUML)】:\n```puml\n{design_models.get('class_diagram')}\n```\n"
+            if design_models.get("activity_diagram"):
+                added_context += f"\n【业务流程图 (PlantUML)】:\n```puml\n{design_models.get('activity_diagram')}\n```\n"
+                
+            if added_context:
+                final_prompt = f"{final_prompt}\n\n=== 补充组合A设计模型上下文 ==={added_context}"
+
+    print(f"📝 最终喂给 LLM 的上下文前 100 字: {final_prompt[:100]}...")
     print(f"📁 输出目录: {output_dir}")
 
-    # 如果有先前步骤生成的设计模型，将其作为上下文喂给代码生成，能够提高代码鲁棒性！
-    design_models = state.get("design_models", {})
-    if design_models and design_models.get("text_design"):
-        requirement = f"{requirement}\n\n【参考架构设计说明】:\n{design_models.get('text_design')}"
-
-    code, test_code = generate_code_and_test(requirement, language)
+    # 调用大模型生成代码和单元测试
+    code, test_code = generate_code_and_test(final_prompt, language)
     
+    # 保持你原有的文件保存和状态返回逻辑
     os.makedirs(output_dir, exist_ok=True)
     ext, test_ext = get_file_extension(language)
     
@@ -123,7 +191,6 @@ def generate_code_node(state: AgentState) -> dict:
         "messages": [f"{language} 代码和测试已完成生成"],
         "steps": state.get("steps", 0) + 1
     }
-
 
 def run_tests_node(state: AgentState) -> dict:
     """运行测试节点"""

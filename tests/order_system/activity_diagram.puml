@@ -1,0 +1,28 @@
+@startuml
+title 订单创建与支付活动图
+
+start
+:用户发起创建订单请求;
+:系统初始化 Order 对象;
+:状态设为 "PENDING";
+
+:遍历商品列表计算总价;
+if (总价格 > 100?) then (yes)
+  :应用 9 折优惠折扣;
+else (no)
+  :保持原价;
+endif
+
+:保存订单到模拟数据库;
+:用户触发支付流程;
+
+if (支付方式有效且余额充足?) then (yes)
+  :更新订单状态为 "PAID";
+  :返回支付成功状态;
+else (no)
+  :更新订单状态为 "FAILED";
+  :返回支付失败状态;
+endif
+
+stop
+@endum
