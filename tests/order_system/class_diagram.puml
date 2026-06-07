@@ -1,0 +1,29 @@
+@startuml
+title 订单系统类图 (Order System Class Diagram)
+
+class Order {
+    + String orderId
+    + String userId
+    + List<OrderItem> items
+    + double totalPrice
+    + String status
+    + LocalDateTime createdAt
+}
+
+class OrderItem {
+    + String productId
+    + int quantity
+    + double pricePerUnit
+}
+
+class OrderSystem {
+    - Map<String, Order> orderDatabase
+    + Map<String, Double> priceDatabase
+    + Order create_order(String userId, List<Map> items)
+    + double calculate_total(String orderId)
+    + boolean pay_order(String orderId, String paymentMethod)
+}
+
+Order "1" *-- "1..*" OrderItem : 包含
+OrderSystem "1" o-- "0..*" Order : 管理
+@endum

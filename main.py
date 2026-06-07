@@ -14,7 +14,7 @@ import io
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from agent.graph import app
-
+from agent.code_runner import run_code_from_uml_dir
 
 # ============================================================
 # 函数式接口（供其他 Python 脚本或插件调用）
@@ -158,7 +158,7 @@ def run_full_workflow(
 def main():
     parser = argparse.ArgumentParser(description='LLM Based Software Engineering Agent CLI')
     
-    parser.add_argument('--input', type=str, required=True, help='输入需求文件路径 (txt)')
+    parser.add_argument('--input', type=str, required=True, help='输入需求文件路径 (txt)或 包含UML文件的设计目录')
     parser.add_argument('--output', type=str, default='./output', help='输出结果目录')
     # 在 choices 中追加 'fix'
     parser.add_argument('--task', type=str, default='full', choices=['design', 'code', 'fix', 'full'],
@@ -171,11 +171,21 @@ def main():
     if not os.path.exists(args.input):
         print(f"❌ 错误: 输入需求文件不存在: {args.input}")
         sys.exit(1)
-        
-    with open(args.input, 'r', encoding='utf-8') as f:
-        requirement = f.read().strip()
-        
-    input_name = os.path.splitext(os.path.basename(args.input))[0]
+
+    # 判断输入是目录还是文件
+    is_dir = os.path.isdir(args.input)
+
+    requirement = ""
+    input_name = os.path.basename(os.path.normpath(args.input))
+    
+    # 💡 修复点 1：只有当输入是文件时才 open 打开它；如果是目录，则把目录路径作为 requirement 存下来
+    if not is_dir:
+        with open(args.input, 'r', encoding='utf-8') as f:
+            requirement = f.read().strip()
+        input_name = os.path.splitext(input_name)[0]
+    else:
+        requirement = args.input
+
     output_dir = _resolve_output_dir(args.output, input_name)
 
     print(f"🚀 智能体启动...")
@@ -183,25 +193,47 @@ def main():
     print(f"📝 编程语言: {args.language}")
     print(f"📂 输出目录: {output_dir}")
     print(f"--- 需求内容预览 ---")
-    print(requirement[:200] + ("..." if len(requirement) > 200 else ""))
+    # 如果是目录，预览目录路径；如果是文本，预览文本
+    if is_dir:
+        print(f"输入路径为目录: {requirement}")
+    else:
+        print(requirement[:200] + ("..." if len(requirement) > 200 else ""))
     print(f"------------------")
     
-    # 任务分发映射表中优雅追加 "fix" 路由
-    task_handlers = {
-        "design": lambda req, out, lang, name: run_design_only(req, out, input_name=name),
-        "code": lambda req, out, lang, name: run_code_only(req, out, lang, input_name=name),
-        "fix": lambda req, out, lang, name: run_fix_only(req, out, lang, input_name=name),  # 新增组合C处理器
-        "full": lambda req, out, lang, name: run_full_workflow(req, out, lang, input_name=name)
-    }
-    
-    handler = task_handlers.get(args.task)
-    if not handler:
-        print(f"❌ 未知任务类型: {args.task}")
-        sys.exit(1)
+    # 定义任务结果变量
+    result = None
+
+    # 核心改动：如果是单独测试 code 且输入是目录（包含UML文件）
+    if args.task == "code" and is_dir:
+        print(f"📂 检测到输入为目录，将从中读取 UML/Markdown 设计模型进行独立编码测试...")
+        result = run_code_from_uml_dir(args.input, output_dir, args.language)
+    else:
+        # 否则按原本的文件读取逻辑走
+        if is_dir:
+            print(f"❌ 错误: 任务类型 {args.task} 不支持将目录作为输入，请提供具体的文件。")
+            sys.exit(1)
+            
+        # 任务分发映射表中优雅追加 "fix" 路由
+        task_handlers = {
+            "design": lambda req, out, lang, name: run_design_only(req, out, input_name=name),
+            "code": lambda req, out, lang, name: run_code_only(req, out, lang, input_name=name),
+            "fix": lambda req, out, lang, name: run_fix_only(req, out, lang, input_name=name),  # 新增组合C处理器
+            "full": lambda req, out, lang, name: run_full_workflow(req, out, lang, input_name=name)
+        }
         
-    # 执行智能体图流程
-    result = handler(requirement, args.output, args.language, input_name)
+        handler = task_handlers.get(args.task)
+        if not handler:
+            print(f"❌ 未知任务类型: {args.task}")
+            sys.exit(1)
+            
+        # 执行智能体图流程
+        # 💡 修复点 2：放进 else 中，确保当独立测试目录时，不会被原本的文件路由和旧的 handler 再次覆盖
+        result = handler(requirement, args.output, args.language, input_name)
     
+    if not result:
+        print("❌ 错误: 智能体没有返回有效的执行结果")
+        sys.exit(1)
+
     # 漂亮的控制台输出结果打印展示
     print(f"\n✨ 智能体执行完毕！")
     
@@ -241,7 +273,6 @@ def main():
         else:
             print("\n⚠️ 智能体执行完成，但部分测试未通过")
             sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

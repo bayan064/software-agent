@@ -1,23 +1,40 @@
 {
   "name": "agent-ui",
   "displayName": "agent-ui",
-  "description": "Prototype of AI Intelligent Agent Plugin",
-  "version": "0.0.1",
+  "description": "AI Intelligent Agent Plugin with Chat Interface",
+  "version": "0.0.2",
   "engines": {
     "vscode": "^1.117.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Chat"
   ],
-  "activationEvents": [
-     "onCommand:agent-ui.generateCode"
-  ],
+  "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agent-ui-sidebar",
+          "title": "Agent UI",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "agent-ui-sidebar": [
+        {
+          "type": "webview",
+          "id": "agent-ui.chatView",
+          "name": "智能助手"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "agent-ui.generateCode",
-        "title": "生成代码"
+        "title": "Agent UI: 生成代码"
       }
     ],
     "keybindings": [
@@ -37,7 +54,7 @@
       ]
     },
     "configuration": {
-      "title": "agent-ui",
+      "title": "Agent UI",
       "properties": {
         "agent-ui.baseUrl": {
           "type": "string",
@@ -46,9 +63,14 @@
         },
         "agent-ui.timeoutMs": {
           "type": "number",
-          "default": 15000,
+          "default": 60000,
           "minimum": 1000,
           "description": "Request timeout in milliseconds"
+        },
+        "agent-ui.streaming": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable streaming output"
         }
       }
     }
