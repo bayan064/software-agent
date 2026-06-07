@@ -481,14 +481,16 @@ def generate_design_models(requirement: str) -> dict:
     if not class_diagram and "@startuml" in content:
         # 兜底：如果模型没写标签但写了 @startuml
         puml_blocks = re.findall(r'(@startuml.*?@endum)', content, re.DOTALL)
-        if len(puml_blocks) > 0: class_diagram = puml_blocks[0]
+        if len(puml_blocks) > 0: 
+            class_diagram = puml_blocks[0]
         
     # 提取活动图/状态图
     activity_match = re.search(r'<<<ACTIVITY_DIAGRAM>>>\s*(.*?)\s*<<<ACTIVITY_DIAGRAM_END>>>', content, re.DOTALL)
     activity_diagram = activity_match.group(1).strip() if activity_match else ""
     if not activity_diagram and "@startuml" in content:
         puml_blocks = re.findall(r'(@startuml.*?@endum)', content, re.DOTALL)
-        if len(puml_blocks) > 1: activity_diagram = puml_blocks[1]
+        if len(puml_blocks) > 1: 
+            activity_diagram = puml_blocks[1]
         
     # 提取设计说明文字
     text_match = re.search(r'<<<TEXT_DESIGN>>>\s*(.*?)\s*<<<TEXT_DESIGN_END>>>', content, re.DOTALL)

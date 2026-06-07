@@ -153,10 +153,13 @@ def run_pytests(test_file_path: str, language: str = "Python") -> dict:
             passed = 0
             failed = 0
             summary_match = re.search(r'(\d+) passed', output)
-            if summary_match: passed = int(summary_match.group(1))
+            if summary_match: 
+                passed = int(summary_match.group(1))
             failed_match = re.search(r'(\d+) failed', output)
-            if failed_match: failed = int(failed_match.group(1))
-            if result.returncode != 0 and failed == 0 and passed == 0: failed = 1
+            if failed_match: 
+                failed = int(failed_match.group(1))
+            if result.returncode != 0 and failed == 0 and passed == 0: 
+                failed = 1
             
             return {'passed': passed, 'failed': failed, 'output': output[-2000:], 'returncode': result.returncode}
 

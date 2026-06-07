@@ -1,7 +1,6 @@
 # check_java_env.py
 import subprocess
 import sys
-import re
 
 def check_java():
     """检查 Java 环境"""

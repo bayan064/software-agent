@@ -1,12 +1,13 @@
 # server.py
-from fastapi import FastAPI
-from pydantic import BaseModel
-from agent.graph import app
 import uvicorn
-from fastapi.responses import StreamingResponse  # 新增
 import json  # 新增
 import asyncio  # 新增
 
+from typing import List, Dict
+from fastapi.responses import StreamingResponse  # 新增
+from fastapi import FastAPI
+from pydantic import BaseModel
+from agent.graph import app
 api = FastAPI()
 
 class Request(BaseModel):

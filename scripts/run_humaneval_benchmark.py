@@ -3,7 +3,6 @@ import subprocess
 import os
 import sys
 import json
-import traceback
 from convert_humaneval import prepare_benchmark_data
 
 # 获取当前脚本所在目录（项目根目录）
@@ -97,9 +96,9 @@ def main():
     print(f"\n{'='*70}\n开始智能体 HumanEval 闭环性能测试 (语言: {language})\n{'='*70}")
 
     for clean_id, req_path, eval_path in test_cases:
-        print(f"\n==================================================")
+        print("\n==================================================")
         print(f"▶️ [任务测试] {clean_id}")
-        print(f"==================================================")
+        print("==================================================")
 
         output_dir = os.path.normpath(
             os.path.join(BASE_DIR, "outputs", "benchmark_results", language, clean_id)

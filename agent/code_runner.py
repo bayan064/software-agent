@@ -46,12 +46,12 @@ def run_code_from_uml_dir(
         else:
             raise ValueError(f"在目录 {input_dir} 中未找到任何有效的 .puml, .md 或 .txt 需求文件！")
 
-    print(f"🚀 已成功加载 UML/设计模型，准备启动组合 B 编码图工作流...")
+    print("🚀 已成功加载 UML/设计模型，准备启动组合 B 编码图工作流...")
     os.makedirs(output_dir, exist_ok=True)
     
     # 触发 LangGraph 的 code 任务
     return app.invoke({
-        "messages": [f"从本地目录加载设计模型成功，启动独立编码流程。"],
+        "messages": ["从本地目录加载设计模型成功，启动独立编码流程。"],
         "steps": 0,
         "code": "",
         "test_code": "",

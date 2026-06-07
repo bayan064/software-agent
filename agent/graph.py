@@ -72,9 +72,6 @@ def generate_design_node(state: AgentState) -> dict:
         "messages": ["系统类图、活动图及说明文档已生成并保存。"]
     }
 
-
-import os
-
 def generate_code_node(state: AgentState) -> dict:
     """组合 B：根据设计模型生成代码节点
     

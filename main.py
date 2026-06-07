@@ -1,20 +1,19 @@
 # main.py
 import sys
 import io
-# 设置标准输出为 UTF-8 编码
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 import argparse
 import os
-import sys
-from typing import Dict, Any
-import sys
-import io
-# 添加项目根目录到路径
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from agent.graph import app
 from agent.code_runner import run_code_from_uml_dir
+from typing import Dict, Any
+
+# 设置标准输出为 UTF-8 编码
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
+# 添加项目根目录到路径
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # ============================================================
 # 函数式接口（供其他 Python 脚本或插件调用）
@@ -112,7 +111,7 @@ def run_fix_only(
     initial_res = run_pytest(test_path if os.path.exists(test_path) else impl_path, language=language)
     
     return app.invoke({
-        "messages": [f"接收到待修复代码，启动组合 C 自愈流程。"],
+        "messages": ["接收到待修复代码，启动组合 C 自愈流程。"],
         "steps": 0,
         "code": existing_code,
         "test_code": existing_test,
@@ -188,24 +187,24 @@ def main():
 
     output_dir = _resolve_output_dir(args.output, input_name)
 
-    print(f"🚀 智能体启动...")
+    print("🚀 智能体启动...")
     print(f"📋 任务类型: {args.task}")
     print(f"📝 编程语言: {args.language}")
     print(f"📂 输出目录: {output_dir}")
-    print(f"--- 需求内容预览 ---")
+    print("--- 需求内容预览 ---")
     # 如果是目录，预览目录路径；如果是文本，预览文本
     if is_dir:
         print(f"输入路径为目录: {requirement}")
     else:
         print(requirement[:200] + ("..." if len(requirement) > 200 else ""))
-    print(f"------------------")
+    print("------------------")
     
     # 定义任务结果变量
     result = None
 
     # 核心改动：如果是单独测试 code 且输入是目录（包含UML文件）
     if args.task == "code" and is_dir:
-        print(f"📂 检测到输入为目录，将从中读取 UML/Markdown 设计模型进行独立编码测试...")
+        print("📂 检测到输入为目录，将从中读取 UML/Markdown 设计模型进行独立编码测试...")
         result = run_code_from_uml_dir(args.input, output_dir, args.language)
     else:
         # 否则按原本的文件读取逻辑走
@@ -235,19 +234,19 @@ def main():
         sys.exit(1)
 
     # 漂亮的控制台输出结果打印展示
-    print(f"\n✨ 智能体执行完毕！")
+    print("\n✨ 智能体执行完毕！")
     
     design_models = result.get("design_models", {})
     if design_models:
-        print(f"\n🎨 生成的设计模型:")
+        print("\n🎨 生成的设计模型:")
         if "class_diagram" in design_models and design_models["class_diagram"]:
-            print(f"   - 类图: 已生成")
+            print("   - 类图: 已生成")
         if "activity_diagram" in design_models and design_models["activity_diagram"]:
-            print(f"   - 活动图: 已生成")
+            print("   - 活动图: 已生成")
         if "state_diagram" in design_models and design_models["state_diagram"]:
-            print(f"   - 状态机图: 已生成")
+            print("   - 状态机图: 已生成")
         if "text_design" in design_models and design_models["text_design"]:
-            print(f"   - 文本设计说明: 已生成")
+            print("   - 文本设计说明: 已生成")
             
     # 显示代码和测试结果
     if args.task != "design":

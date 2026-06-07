@@ -75,7 +75,7 @@ for language in languages:
 
         except subprocess.TimeoutExpired:
 
-            print(f"❌ 超时（300秒）")
+            print("❌ 超时（300秒）")
             
             results.append((name, "❌ 超时"))
         except Exception as e:
