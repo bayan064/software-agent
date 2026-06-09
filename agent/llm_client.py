@@ -443,6 +443,95 @@ def _validate_java_test_code(test_code: str, solution_class_name: str = "Solutio
 
 
 
+def analyze_test_error_with_llm(error_log: str, code: str, language: str = "Python", output_dir: str = "output") -> str:
+    """
+    使用大模型分析测试失败的原因，精准定位错误位置与类型，
+    并自动将结构化的 Markdown 错误报告保存到指定的 output 目录下。
+    """
+    import os
+    import re
+
+    # 1. 静态正则预解析，为大模型提供高精准度的行号与方法名辅助线索
+    extracted_loc = "未能通过正则锁定（完全依赖大模型从日志上下文语义中推断）"
+    try:
+        lang_lower = language.lower()
+        if lang_lower == "python":
+            # 模式1: File "xxx/solution.py", line 8, in two_sum
+            m1 = re.search(r'File ".*?(solution\.py)", line (\d+), in (\w+)', error_log, re.IGNORECASE)
+            if m1:
+                extracted_loc = f"solution.py 第 {m1.group(2)} 行，函数 {m1.group(3)}()"
+            else:
+                # 模式2: solution.py:8: in two_sum
+                m2 = re.search(r'(solution\.py):(\d+):\s+in\s+(\w+)', error_log, re.IGNORECASE)
+                if m2:
+                    extracted_loc = f"solution.py 第 {m2.group(2)} 行，函数 {m2.group(3)}()"
+        elif lang_lower == "java":
+            # 模式1: at Solution.twoSum(Solution.java:15)
+            m1 = re.search(r'at\s+Solution\.(\w+)\((Solution\.java):(\d+)\)', error_log)
+            if m1:
+                extracted_loc = f"Solution.java 第 {m1.group(3)} 行，方法 {m1.group(1)}()"
+    except Exception:
+        pass
+
+    # 2. 构建针对错误定位、分类与保存优化后的 Markdown 格式强约束 Prompt
+    prompt = f"""你是一个顶级的软件质量保障与调试专家。当前智能体执行的代码在单元测试中失败了。请仔细阅读源码与报错日志，完成错误精准定位与根因诊断。
+
+【基本上下文】
+- 编程语言: {language}
+- 基础正则提取辅助线索: {extracted_loc}
+
+【实现的源代码】
+{code}
+【单元测试报错日志】
+{error_log}
+【输出规范要求】
+你必须严格按照以下指定的 Markdown 格式直接输出分析结果，切勿包含任何多余的解释或聊天字句。确保字词准确、通俗易懂：
+
+# 单元测试错误分析报告
+
+## 1. 错误定位信息
+- **错误位置**: [写明文件名、精确行号以及函数/方法名。如果基础正则提取的线索正确，请优先参考和校准。示例：solution.py 第 8 行，函数 two_sum()]
+- **错误类型**: [请从以下四类中选择最精准的一个填入：语法错误 / 逻辑错误 / 边界条件错误 / 运行时异常]
+
+## 2. 根本原因分析
+[在此处生成人类可读的清晰、通俗的错误解释。详细剖析为什么会报错，说明由于什么输入的诱发导致了代码哪一部分的逻辑失效。]
+
+## 3. 修复建议指导
+[在此处给出高价值的修复思路或伪代码改动指引。]
+"""
+
+    # 3. 调用大模型生成报告（复用你代码中的 client 与 MODEL_NAME）
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1  # 使用低随机度确保生成的 Markdown 格式极其稳定
+        )
+        report = response.choices[0].message.content.strip()
+    except Exception as e:
+        report = (
+            f"# 单元测试错误分析报告\n\n"
+            f"## 1. 错误定位信息\n"
+            f"- **错误位置**: 提取失败\n"
+            f"- **错误类型**: 运行时异常\n\n"
+            f"## 2. 根本原因分析\n"
+            f"智能体调用大模型分析时发生异常: {str(e)}"
+        )
+
+    # 4. 自动创建目录并保存为 Markdown 文件
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        report_path = os.path.join(output_dir, "error_report.md")
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(report)
+        print(f"✅ 错误分析报告已成功保存至: {report_path}")
+    except Exception as e:
+        print(f"⚠️ 保存错误报告 Markdown 文件失败: {e}")
+
+    return report
+
+
+
 def fix_code(code: str, error_log: str, test_code: str, requirement: str, language: str = "Python") -> str:
     """根据错误日志和测试用例修复代码"""
     # 先分析失败原因

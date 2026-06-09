@@ -11,7 +11,7 @@ from tools.file_tools import save_code
 from tools.executor import run_pytest
 
 # 引入新写的设计生成函数
-from agent.llm_client import generate_code_and_test, fix_code, generate_design_models
+from agent.llm_client import generate_code_and_test, fix_code, generate_design_models, analyze_test_error_with_llm
 
 
 # 1. 定义状态 (确保兼容 task 和 design_models)
@@ -219,7 +219,15 @@ def fix_code_node(state: AgentState) -> dict:
     error_log = state.get("test_result", {}).get("output", "")
     requirement = state.get("requirement", "")
     language = state.get("language", "Python")
-    output_dir = state.get("output_dir", "output")
+    output_dir = state.get("output_dir", "output") # 动态获取图状态中的输出路径
+
+    #  在这里触发刚才更新的分析函数，它会自动在 output_dir 下写入 error_report.md
+    _ = analyze_test_error_with_llm(
+        error_log=error_log, 
+        code=code, 
+        language=language, 
+        output_dir=output_dir
+    )
 
     fixed = fix_code(code, error_log, test_code, requirement, language)
     
@@ -229,7 +237,7 @@ def fix_code_node(state: AgentState) -> dict:
     
     return {
         "code": fixed,
-        "messages": ["代码已根据错误日志尝试进行修复"],
+        "messages": ["错误分析报告（error_report.md）已生成，且代码已根据错误日志尝试进行修复"],
         "steps": state.get("steps", 0) + 1
     }
 
