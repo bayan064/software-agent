@@ -6,6 +6,7 @@ import uvicorn
 from fastapi.responses import StreamingResponse  # 新增
 import json  # 新增
 import asyncio  # 新增
+from typing import List, Dict
 
 api = FastAPI()
 
