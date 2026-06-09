@@ -24,7 +24,7 @@ def ensure_junit_jar():
 def compile_java(java_file_path: str) -> tuple:
     """
     编译 Java 文件。
-    修复点：在编译时显式添加 JUnit Jar 到 Classpath (-cp)，否则 javac 会报'找不到符号'错误。
+    修复点：强制使用UTF-8编码编译
     """
     try:
         test_dir = os.path.dirname(java_file_path)
@@ -40,26 +40,81 @@ def compile_java(java_file_path: str) -> tuple:
         if os.path.exists(solution_file):
             java_files.append(solution_file)
         
-        # 3. 设置类路径：Windows 使用分号 ';'，Linux/Mac 使用冒号 ':'
+        # 3. 设置类路径
         cp_separator = ";" if os.name == 'nt' else ":"
-        # 当前目录 (.) 和 JUnit Jar 必须都在类路径中
         classpath = f".{cp_separator}{junit_jar}"
-
-        # 4. 执行编译命令
-        cmd = ['javac', '-cp', classpath] + java_files
+        
+        # 4. 关键修复：添加 -encoding UTF-8 参数
+        cmd = ['javac', '-encoding', 'UTF-8', '-cp', classpath] + java_files
+        
+        print(f"🔨 编译命令: {' '.join(cmd)}")
         
         result = subprocess.run(
             cmd,
             cwd=test_dir,
             capture_output=True,
             text=True,
-            encoding="utf-8",
+            encoding="utf-8",  # 输出使用UTF-8解码
             errors="replace",
             timeout=30
         )
         
         if result.returncode != 0:
+            error_msg = result.stderr
+            print(f"❌ Java编译失败:\n{error_msg[:500]}")
+            
+            # 如果还是编码问题，尝试移除中文注释后重试
+            if "unmappable character" in error_msg or "GBK" in error_msg:
+                print("🔧 检测到编码问题，尝试移除中文注释...")
+                for java_file in java_files:
+                    with open(java_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    # 移除所有中文注释行
+                    import re
+                    # 移除行注释中的中文
+                    lines = content.split('\n')
+                    cleaned_lines = []
+                    for line in lines:
+                        # 如果行注释包含中文，移除该注释
+                        if '//' in line:
+                            comment_start = line.index('//')
+                            comment = line[comment_start+2:].strip()
+                            # 如果注释包含中文，删除整个注释部分
+                            if re.search(r'[\u4e00-\u9fff]', comment):
+                                line = line[:comment_start].rstrip()
+                        cleaned_lines.append(line)
+                    
+                    cleaned_content = '\n'.join(cleaned_lines)
+                    
+                    # 备份原文件
+                    backup_file = java_file + ".bak"
+                    import shutil
+                    shutil.copy2(java_file, backup_file)
+                    
+                    with open(java_file, 'w', encoding='utf-8') as f:
+                        f.write(cleaned_content)
+                    
+                    print(f"✅ 已清理 {java_file} 中的中文注释")
+                
+                # 重新编译
+                result = subprocess.run(
+                    cmd,
+                    cwd=test_dir,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=30
+                )
+                
+                if result.returncode == 0:
+                    print("✅ 清理注释后编译成功")
+                    return True, "Compilation successful after removing Chinese comments"
+            
             return False, result.stderr
+        
+        print("✅ Java编译成功")
         return True, "Compilation successful"
     except Exception as e:
         return False, str(e)
@@ -127,6 +182,48 @@ def run_java_tests(test_file_path: str) -> dict:
         return {'passed': 0, 'failed': 1, 'output': "Execution timeout", 'returncode': -1}
     except Exception as e:
         return {'passed': 0, 'failed': 1, 'output': f"Error: {str(e)}", 'returncode': -1}
+
+def analyze_java_test_failures(test_output: str) -> dict:
+    """
+    分析Java测试失败原因，提供修复建议
+    """
+    analysis = {
+        "error_type": "unknown",
+        "suggestions": [],
+        "failed_tests": []
+    }
+    
+    # 解析失败测试
+    import re
+    failure_pattern = r'(\w+\(\))\s+failed:\s*(.*?)(?=\n\s*\w+\(\)|$)'
+    failures = re.findall(failure_pattern, test_output, re.DOTALL)
+    
+    for test_name, error_msg in failures:
+        analysis["failed_tests"].append({"name": test_name, "error": error_msg[:200]})
+        
+        # 分析错误类型
+        if "AssertionFailedError" in error_msg:
+            if "expected:" in error_msg and "but was:" in error_msg:
+                analysis["error_type"] = "assertion_mismatch"
+                # 提取期望值和实际值
+                import re
+                expected_match = re.search(r'expected:\s*<(.+?)>', error_msg)
+                actual_match = re.search(r'but was:\s*<(.+?)>', error_msg)
+                if expected_match and actual_match:
+                    analysis["suggestions"].append(
+                        f"断言值不匹配：期望 {expected_match.group(1)}，实际 {actual_match.group(1)}。检查算法逻辑。"
+                    )
+        elif "NullPointerException" in error_msg:
+            analysis["error_type"] = "null_pointer"
+            analysis["suggestions"].append("出现空指针异常，请检查是否正确初始化对象或处理null输入。")
+        elif "IndexOutOfBoundsException" in error_msg:
+            analysis["error_type"] = "index_out_of_bounds"
+            analysis["suggestions"].append("数组索引越界，请检查边界条件处理。")
+    
+    if not analysis["suggestions"]:
+        analysis["suggestions"].append("请检查代码逻辑是否正确处理所有测试用例。")
+    
+    return analysis
 
 def run_pytests(test_file_path: str, language: str = "Python") -> dict:
     """根据语言运行对应的测试框架"""

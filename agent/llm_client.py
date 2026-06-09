@@ -189,11 +189,19 @@ def generate_code_and_test(requirement: str, language: str = "Python") -> tuple:
 - 使用 public class Solution
 - 方法使用合适的访问修饰符
 - 不需要main方法
-- 允许并鼓励导入标准库（如 import java.util.*; import java.util.stream.*; 等），请将 import 写在类定义的最上方。
+- 如果需要使用集合类，必须在代码开头添加import语句，例如：
+  import java.util.*;
+  import java.util.stream.*;
+- 方法返回值必须与需求一致
 
 【JUnit测试要求】
 - 测试类名为 TestSolution
+- 测试类必须有 public 修饰符
 - 每个测试方法必须标注 @Test
+- 必须在测试类开头添加：
+  import org.junit.jupiter.api.Test;
+  import static org.junit.jupiter.api.Assertions.*;
+- 测试方法命名规范：test[功能描述]_[场景]
 - 使用 assertArrayEquals 比较数组
 - 使用 assertEquals 比较值
 - 使用 assertThrows 测试异常
@@ -225,9 +233,16 @@ import static org.junit.jupiter.api.Assertions.*;
 
 public class TestSolution {{
     @Test
-    void testCase1() {{
+    void testNormalCase() {{
         Solution solution = new Solution();
         int[] result = solution.twoSum(new int[]{{2, 7, 11, 15}}, 9);
+        assertArrayEquals(new int[]{{0, 1}}, result);
+    }}
+    
+    @Test
+    void testBoundaryCase() {{
+        Solution solution = new Solution();
+        int[] result = solution.twoSum(new int[]{{3, 3}}, 6);
         assertArrayEquals(new int[]{{0, 1}}, result);
     }}
 }}
@@ -236,6 +251,8 @@ public class TestSolution {{
 【重要】
 - 不要输出任何其他解释文字
 - 测试部分必须包含 import 和 static import
+- 必须严格使用上述输出格式
+- 测试代码必须能独立编译运行
 
 请生成："""
     else:
@@ -306,6 +323,10 @@ def test_case_1():
             test_code = _strip_function_definition(test_code, func_name)
     if language == "Java" and test_code:
         test_code = _ensure_java_imports(test_code)
+        # 添加验证和修复
+        is_valid, test_code, msg = _validate_java_test_code(test_code)
+        if not is_valid:
+            print(f"⚠️ Java测试代码验证失败: {msg}")
 
     if code and not test_code:
         test_code = _generate_test_only(code, language)
@@ -355,9 +376,81 @@ def _generate_test_only(code: str, language: str = "Python") -> str:
     return test_code
 
 
+def _validate_java_test_code(test_code: str, solution_class_name: str = "Solution") -> tuple:
+    """
+    验证并修复Java测试代码
+    返回: (is_valid, fixed_code, error_message)
+    """
+    if not test_code:
+        return False, test_code, "测试代码为空"
+    
+    original_code = test_code
+    fixed = test_code
+    
+    # 1. 确保有package声明（如果有的话保持原样）
+    # 2. 确保有必要的import
+    required_imports = [
+        'import org.junit.jupiter.api.Test;',
+        'import static org.junit.jupiter.api.Assertions.*;'
+    ]
+    
+    # 检查是否需要添加import
+    for imp in required_imports:
+        if imp not in fixed:
+            # 在类声明之前插入
+            lines = fixed.split('\n')
+            insert_pos = 0
+            for i, line in enumerate(lines):
+                if line.strip() and not line.strip().startswith('import') and not line.strip().startswith('package'):
+                    insert_pos = i
+                    break
+            lines.insert(insert_pos, imp)
+            fixed = '\n'.join(lines)
+            print(f"🔧 自动添加缺失的import: {imp}")
+    
+    # 3. 检查测试类名
+    if 'public class TestSolution' not in fixed and 'class TestSolution' not in fixed:
+        # 尝试重命名测试类
+        import re
+        class_match = re.search(r'(?:public\s+)?class\s+(\w+)', fixed)
+        if class_match:
+            old_name = class_match.group(1)
+            fixed = fixed.replace(f'class {old_name}', 'public class TestSolution')
+            fixed = fixed.replace(f'class {old_name}', 'class TestSolution')
+            print(f"🔧 将测试类名从 {old_name} 改为 TestSolution")
+    
+    # 4. 检查测试方法是否有@Test注解
+    import re
+    lines = fixed.split('\n')
+    modified = False
+    for i, line in enumerate(lines):
+        # 匹配方法定义但前面没有@Test
+        if re.match(r'\s+public\s+void\s+test\w+\s*\(', line) and i > 0:
+            prev_line = lines[i-1].strip() if i > 0 else ""
+            if '@Test' not in prev_line:
+                lines.insert(i, '    @Test')
+                modified = True
+                print(f"🔧 为方法 {line.strip()} 添加@Test注解")
+                break
+    
+    if modified:
+        fixed = '\n'.join(lines)
+    
+    # 5. 验证修复后的代码能否通过基本语法检查
+    # （这里可以添加更严格的检查）
+    
+    return True, fixed, "验证通过"
+
+
+
 def fix_code(code: str, error_log: str, test_code: str, requirement: str, language: str = "Python") -> str:
     """根据错误日志和测试用例修复代码"""
+    # 先分析失败原因
+    from tools.executor import analyze_java_test_failures
+    analysis = analyze_java_test_failures(error_log)
     
+    analysis_text = "\n".join([f"- {s}" for s in analysis["suggestions"]])
+
     if language == "Java":
         prompt = f"""以下Java代码运行测试失败，请分析并修复。
 
@@ -373,12 +466,17 @@ def fix_code(code: str, error_log: str, test_code: str, requirement: str, langua
 【错误日志】
 {error_log}
 
+【智能分析 - 失败原因】
+{analysis_text}
+
 重要：
 1. 请只修复 Solution.java 中的代码。
 2. 如果错误日志显示 "cannot find symbol" 或缺少类型，请务必在 Solution.java 最上方添加相应的 import 语句（如 import java.util.*;）。
 3. 确保 Solution.java 中只有必要的 import 语句和类定义。
+4. 确保正确处理边界条件和空输入。
+5. 检查方法签名是否与测试代码匹配
 
-要求：只输出修复后的完整 Solution.java 代码，不要有任何解释。
+要求：只输出修复后的完整 Solution.java 代码，不要有任何解释，代码必须能直接编译运行。
 
 修复后的 Solution.java："""
     else:
