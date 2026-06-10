@@ -26,6 +26,7 @@ interface Conversation {
     messages: Message[];
     createdAt: Date;
     updatedAt: Date;
+    isTemporary?: boolean;
 }
 
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
@@ -42,17 +43,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         private readonly _context: vscode.ExtensionContext
     ) {
         this._loadConversations();
-        // 清理所有空的新对话
-        this._cleanupEmptyNewConversation();
         
-        // 如果有历史对话，切换到最新的那个，否则创建新对话
-        if (this._conversations.length > 0) {
-            this._currentConversationId = this._conversations[0].id;
-            this._messages = this._conversations[0].messages;
-        } else {
-            // 创建新对话但不立即保存到 conversations 中（标记为临时）
-            this._createNewConversation(false);
-        }
+        // 先清理所有空的临时对话（确保启动时干净）
+        this._cleanupAllTemporaryConversations();
+        
+        // 如果有历史对话，不自动加载，只是存储起来
+        // 启动时总是创建一个新的临时对话（带欢迎消息）
+        this._createTemporaryConversation();
+        
+        // 如果有历史对话，历史列表会保留，但当前显示的是临时对话
+        this._updateConversationList();
     }
 
     public resolveWebviewView(
@@ -128,20 +128,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                     this._switchConversation(data.conversationId);
                     break;
                 case 'deleteConversation': {
-                    const selection = await vscode.window.showWarningMessage(
-                        '确定要删除这个对话吗？',
-                        { modal: true },
-                        '确定'
-                    );
-                    if (selection === '确定') {
-                        this._deleteConversation(data.conversationId);
-                    }
+                    this._deleteConversation(data.conversationId);
                     break;
                 }
             }
         });
 
-        this._addSystemMessage('👋 欢迎使用 Agent UI！\n\n我可以帮助你生成代码、设计方案。请告诉我你的需求。');
+        this._addSystemMessage('👋 欢迎使用 Software Engineering Agent！\n\n我支持以下功能：\n📐 分析+设计（类图、活动图、状态机图）\n💻 实现+测试（代码生成、单元测试）\n🔧 调试+修复（错误定位、代码修复）\n\n请告诉我你的需求。');
     }
 
     private _loadConversations() {
@@ -159,6 +152,36 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         this._context.globalState.update('conversations', this._conversations);
     }
 
+    private _createTemporaryConversation(): string {
+        const id = `temp_${Date.now()}`;
+        const tempConv: Conversation = {
+            id: id,
+            title: '新对话',
+            messages: [],
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            isTemporary: true  // 标记为临时对话
+        };
+        
+        // 临时对话不保存到 _conversations 中
+        this._currentConversationId = id;
+        this._messages = [];
+        
+        this._view?.webview.postMessage({ type: 'clearMessages' });
+        this._addSystemMessage('👋 欢迎使用 Software Engineering Agent！\n\n我支持以下功能：\n📐 分析+设计（类图、活动图、状态机图）\n💻 实现+测试（代码生成、单元测试）\n🔧 调试+修复（错误定位、代码修复）\n\n请告诉我你的需求。');
+        
+        return id;
+    }
+
+    private _cleanupAllTemporaryConversations() {
+        // 清理所有临时对话（从存储中删除）
+        const beforeCount = this._conversations.length;
+        this._conversations = this._conversations.filter(c => !c.isTemporary);
+        if (beforeCount !== this._conversations.length) {
+            this._saveConversations();
+        }
+    }
+
     private _createNewConversation(shouldSave: boolean = true): string {
         const id = Date.now().toString();
         const newConv: Conversation = {
@@ -166,7 +189,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             title: '新对话',
             messages: [],
             createdAt: new Date(),
-            updatedAt: new Date()
+            updatedAt: new Date(),
+            isTemporary: false  // 明确标记为非临时
         };
         
         if (shouldSave) {
@@ -179,7 +203,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         
         this._updateConversationList();
         this._view?.webview.postMessage({ type: 'clearMessages' });
-        this._addSystemMessage('👋 欢迎使用 Agent UI！\n\n我可以帮助你生成代码、设计方案。请告诉我你的需求。');
+        this._addSystemMessage('👋 欢迎使用 Software Engineering Agent！\n\n我支持以下功能：\n📐 分析+设计（类图、活动图、状态机图）\n💻 实现+测试（代码生成、单元测试）\n🔧 调试+修复（错误定位、代码修复）\n\n请告诉我你的需求。');
         
         return id;
     }
@@ -204,10 +228,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
 
     private _switchConversation(id: string) {
-        // 在切换前，先清理当前的空对话（如果不是同一个）
-        const currentConv = this._conversations.find(c => c.id === this._currentConversationId);
-        if (currentConv && currentConv.title === '新对话' && currentConv.messages.length === 0 && currentConv.id !== id) {
-            this._deleteConversation(this._currentConversationId, false); // 静默删除，不弹窗
+        // 如果要切换的对话不是当前临时对话，且当前有临时对话存在，则删除临时对话（不保存）
+        const currentIsTemporary = !this._conversations.find(c => c.id === this._currentConversationId);
+        
+        if (currentIsTemporary && id !== this._currentConversationId) {
+            // 当前是临时对话，切换到其他对话时，临时对话直接丢弃
+            // 不需要保存，直接忽略
+            console.log('Discarding temporary conversation');
         }
         
         const conv = this._conversations.find(c => c.id === id);
@@ -215,7 +242,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             this._currentConversationId = id;
             this._messages = conv.messages;
 
-            // 切换对话过滤显示渲染文案
             this._view?.webview.postMessage({
                 type: 'loadConversation',
                 messages: conv.messages.map(m => ({ role: m.role, content: m.displayText || m.content }))
@@ -226,7 +252,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         
         // 如果切换后没有对话了，创建一个新的临时对话
         if (this._conversations.length === 0) {
-            this._createNewConversation(false);
+            this._createTemporaryConversation();
         }
     }
 
@@ -262,29 +288,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private _updateConversationTitle(conversationId: string, firstMessage: string) {
-    const conv = this._conversations.find(c => c.id === conversationId);
-    if (conv && conv.title === '新对话') {
-        // 使用时间戳让标题更有区分度
-        const now = new Date();
-        const timeStr = `${now.getMonth()+1}/${now.getDate()} ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
-        let title = firstMessage.slice(0, 15) + (firstMessage.length > 15 ? '...' : '');
-        // 如果没有有效文本内容（比如只有文件），使用时间作为标题
-        if (!title || title.length === 0) {
-            title = `对话 ${timeStr}`;
-        } else {
-            title = `${title} (${timeStr})`;
-        }
-        conv.title = title;
-        this._saveConversations();
-        this._updateConversationList();
-    }
-}
-
     private _updateConversationList() {
+        const permanentConversations = this._conversations.filter(c => !c.isTemporary);
+        
         this._view?.webview.postMessage({
             type: 'updateConversationList',
-            conversations: this._conversations.map(c => ({
+            conversations: permanentConversations.map(c => ({
                 id: c.id,
                 title: c.title,
                 isCurrent: c.id === this._currentConversationId
@@ -426,12 +435,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         <body>
             <div class="chat-container">
                 <div class="chat-header">
-                    <h3>🤖 Agent UI Assistant</h3>
+                    <h3>🤖 Software Engineering Agent</h3>
                     </div>
                 <div class="messages-container" id="messagesContainer">
                     <div class="welcome-message">
                         <div class="assistant-message">
-                            <div class="message-content">👋 欢迎使用 Agent UI！</div>
+                            <div class="message-content">👋 欢迎使用 Software Engineering Agent！</div>
                         </div>
                     </div>
                 </div>
@@ -454,41 +463,49 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     private async _handleUserMessage(text: string, files?: { name: string; content: string }[]) {
         if (!text.trim() && (!files || files.length === 0)) return;
 
+        // 1. 先确定对话是否正式（临时转正式）
+        const isTemporary = !this._conversations.find(c => c.id === this._currentConversationId);
+        let isFirstMessage = false;  // 标记是否是第一条消息
+        
+        if (isTemporary) {
+            // 临时对话转正式，这是第一条消息
+            isFirstMessage = true;
+            const newId = Date.now().toString();
+            const newConv: Conversation = {
+                id: newId,
+                title: '新对话',  // 临时标题，马上会更新
+                messages: [],
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                isTemporary: false
+            };
+            this._conversations.unshift(newConv);
+            this._currentConversationId = newId;
+            this._messages = [];
+            this._saveConversations();
+            this._updateConversationList();
+        } else {
+            // 已有正式对话，检查是否为空对话（没有消息）
+            const existingConv = this._conversations.find(c => c.id === this._currentConversationId);
+            if (existingConv && existingConv.messages.length === 0) {
+                isFirstMessage = true;
+            }
+        }
+
+        // 2. 构建用户消息内容
         let fullRequirement = text || '';
         let displayTitle = text || '';
         let displayText = text || '';
 
-        // 检查当前对话是否为空的新对话（临时对话）
-        const currentConv = this._conversations.find(c => c.id === this._currentConversationId);
-        const isEmptyNewConv = currentConv === undefined && this._currentConversationId !== '';
-        
-        // 如果是临时空对话，需要先保存它
-        if (isEmptyNewConv) {
-            const newConv: Conversation = {
-                id: this._currentConversationId,
-                title: '新对话',
-                messages: [],
-                createdAt: new Date(),
-                updatedAt: new Date()
-            };
-            this._conversations.unshift(newConv);
-            this._saveConversations();
-            this._updateConversationList();
-        }
-
-        // 【修改点 7】：建立安全的显示文案，阻断源文件内容泄露到 DOM 结构中
         if (files && files.length > 0) {
             const filesText = files.map(f => `[文件: ${f.name}]\n\`\`\`\n${f.content}\n\`\`\``).join('\n\n');
             fullRequirement = `${text ? text + '\n\n' : ''}${filesText}`;
-            
             const fileBadges = files.map(f => `📎 [已附加文件上下文: ${f.name}]`).join(' ');
             displayText = `${text ? text + '\n\n' : ''}${fileBadges}`;
-            
-            if (!displayTitle) displayTitle = `提交了 ${files.length} 个本地上下文`;
-        } else {
-            displayText = text;
+            if (!displayTitle) displayTitle = `文件分析 (${files.length}个文件)`;
         }
 
+        // 3. 创建用户消息
         const userMessage: Message = { 
             role: 'user', 
             content: fullRequirement,
@@ -496,34 +513,37 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         };
         this._messages.push(userMessage);
 
-        // 找到或创建当前的对话对象
+        // 4. 更新对话对象的消息数组
         let conv = this._conversations.find(c => c.id === this._currentConversationId);
-        if (!conv) {
-            conv = {
-                id: this._currentConversationId,
-                title: '新对话',
-                messages: [],
-                createdAt: new Date(),
-                updatedAt: new Date()
-            };
-            this._conversations.unshift(conv);
-        }
-        
-        // 更新对话标题（第一条消息）
-        if (conv.messages.length === 1) {
-            this._updateConversationTitle(this._currentConversationId, displayTitle || text);
+        if (conv) {
+            conv.messages = this._messages;
+            conv.updatedAt = new Date();
+            
+            // 5. 更新标题（第一条消息）
+            if (isFirstMessage) {
+                const rawTitle = text.trim();
+                if (rawTitle.length > 0) {
+                    let title = rawTitle.length > 15 ? rawTitle.substring(0, 15) + '...' : rawTitle;
+                    conv.title = title;
+                } else if (files && files.length > 0) {
+                    conv.title = `文件分析 (${files.length}个文件)`;
+                } else {
+                    conv.title = '新对话';
+                }
+                this._saveConversations();
+                this._updateConversationList();
+            } else {
+                this._saveConversations();
+            }
         }
 
-        conv.messages = this._messages;
-        conv.updatedAt = new Date();
-        this._saveConversations();
-
-        // 发送给前端 UI 时只派发经过净化过滤的 displayText 
+        // 6. 发送到前端
         this._view?.webview.postMessage({
             type: 'addMessage',
             message: { role: userMessage.role, content: displayText }
         });
 
+        // 7. 调用后端
         await this._streamResponse(fullRequirement);
     }
 

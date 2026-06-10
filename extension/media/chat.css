@@ -549,3 +549,117 @@ body {
 .assistant-message, .system-message {
     align-items: flex-start;
 }
+
+/* ================= 自定义主题覆盖 ================= */
+
+/* 1. 修改标题栏背景和渐变 */
+.chat-header {
+    background: linear-gradient(135deg, var(--vscode-sideBarTitle-background) 0%, var(--vscode-editor-background) 100%);
+    border-bottom: 2px solid var(--vscode-focusBorder);
+}
+
+.chat-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    background: linear-gradient(135deg, var(--vscode-textLink-foreground) 0%, var(--vscode-textPreformat-foreground) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+/* 2. 用户消息气泡渐变优化 */
+.user-message .message-content {
+    background: linear-gradient(135deg, #007acc 0%, #005a9e 100%);
+    box-shadow: 0 2px 8px rgba(0, 122, 204, 0.3);
+}
+
+/* 3. 助手消息气泡边框发光效果 */
+.assistant-message .message-content {
+    border: 1px solid rgba(0, 122, 204, 0.3);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 122, 204, 0.1);
+}
+
+/* 4. 输入框聚焦效果 */
+#userInput:focus {
+    border-color: #007acc;
+    box-shadow: 0 0 0 2px rgba(0, 122, 204, 0.2);
+}
+
+/* 5. 发送按钮渐变 */
+.primary-btn {
+    background: linear-gradient(135deg, #007acc 0%, #005a9e 100%);
+    border: none;
+    font-weight: 600;
+}
+
+.primary-btn:hover {
+    background: linear-gradient(135deg, #005a9e 0%, #003d6b 100%);
+    transform: translateY(-1px);
+}
+
+/* 6. 代码块头部优化 */
+.code-block-header {
+    background: linear-gradient(135deg, var(--vscode-sideBar-background) 0%, var(--vscode-editor-background) 100%);
+    font-family: monospace;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+}
+
+/* 7. 对话历史列表悬停效果 */
+.conversation-item:hover {
+    background: linear-gradient(90deg, var(--vscode-list-hoverBackground) 0%, transparent 100%);
+    border-left: 3px solid #007acc;
+    padding-left: 9px;
+}
+
+/* 8. 当前对话高亮 */
+.conversation-item.current {
+    background: linear-gradient(90deg, rgba(0, 122, 204, 0.2) 0%, transparent 100%);
+    border-left: 3px solid #007acc;
+    font-weight: 600;
+}
+
+/* 9. 滚动条美化 */
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, var(--vscode-scrollbarSlider-background) 0%, var(--vscode-scrollbarSlider-hoverBackground) 100%);
+    border-radius: 10px;
+}
+
+/* 10. 添加微妙的整体渐变背景 */
+body {
+    background: linear-gradient(135deg, var(--vscode-editor-background) 0%, var(--vscode-sideBar-background) 100%);
+}
+
+/* 11. 消息入场动画加速 */
+.user-message, .assistant-message, .system-message {
+    animation: slideUpFade 0.2s ease forwards;
+}
+
+/* 12. 系统消息左侧边框加粗 */
+.system-message .message-content {
+    border-left: 4px solid #007acc;
+    background-color: var(--vscode-textBlockQuote-background);
+}
+
+/* 13. 按钮点击反馈 */
+.primary-btn, .secondary-btn, .icon-btn {
+    transition: all 0.15s ease;
+}
+
+.primary-btn:active, .secondary-btn:active, .icon-btn:active {
+    transform: scale(0.96);
+}
+
+/* 14. 欢迎消息特殊样式 */
+.welcome-message .assistant-message .message-content {
+    background: linear-gradient(135deg, rgba(0, 122, 204, 0.1) 0%, rgba(0, 122, 204, 0.05) 100%);
+    border: 1px solid rgba(0, 122, 204, 0.2);
+    font-size: 14px;
+}
+
+/* 15. 文件指示器样式 */
+.file-indicator {
+    background: linear-gradient(135deg, var(--vscode-editorWidget-background) 0%, var(--vscode-sideBar-background) 100%);
+    border-left: 3px solid #007acc;
+}

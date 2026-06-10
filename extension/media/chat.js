@@ -292,7 +292,7 @@ function clearMessages() {
     welcomeDiv.className = 'welcome-message';
     welcomeDiv.innerHTML = `
         <div class="assistant-message">
-            <div class="message-content">👋 欢迎使用 Agent UI！</div>
+            <div class="message-content">👋 欢迎使用 Software Engineering Agent！</div>
         </div>
     `;
     messagesContainer.appendChild(welcomeDiv);
