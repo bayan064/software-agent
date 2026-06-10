@@ -2,6 +2,7 @@
 import uvicorn
 import json  # 新增
 import asyncio  # 新增
+from typing import List, Dict
 
 from typing import List, Dict
 from fastapi.responses import StreamingResponse  # 新增

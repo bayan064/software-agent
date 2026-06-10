@@ -3,6 +3,159 @@
 let streamingMessageElement = null;
 let conversationsListVisible = false;
 
+// 全局复制生成代码块函数
+window.copyCodeBlock = function(btn) {
+    const wrapper = btn.closest('.code-block-wrapper');
+    const codeEl = wrapper.querySelector('code');
+    if (codeEl) {
+        navigator.clipboard.writeText(codeEl.textContent);
+        btn.textContent = '✅ 已复制';
+        setTimeout(() => { btn.textContent = '📋 复制'; }, 2000);
+    }
+};
+
+// 封装统一的代码块渲染模板
+function renderCodeBlock(code, lang = 'python') {
+    return `
+    <div class="code-block-wrapper">
+        <div class="code-block-header">
+            <span>${lang}</span>
+            <span class="copy-code-btn" onclick="window.copyCodeBlock(this)">📋 复制</span>
+        </div>
+        <pre style="margin: 0; border: none; border-radius: 0;"><code class="language-${lang}">${escapeHtml(code)}</code></pre>
+    </div>`;
+}
+
+// 进入消息编辑模式
+function enterEditMode(messageDiv, contentDiv, originalContent) {
+    if (messageDiv.classList.contains('editing')) return;
+    messageDiv.classList.add('editing');
+    
+    const oldHTML = contentDiv.innerHTML;
+    contentDiv.innerHTML = '';
+    
+    const textarea = document.createElement('textarea');
+    textarea.className = 'edit-textarea';
+    textarea.value = originalContent;
+    
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'primary-btn save-edit-btn';
+    saveBtn.textContent = '重新发送';
+    
+    const cancelEditBtn = document.createElement('button');
+    cancelEditBtn.className = 'secondary-btn cancel-edit-btn';
+    cancelEditBtn.textContent = '取消';
+    
+    const btnContainer = document.createElement('div');
+    btnContainer.className = 'edit-btn-container';
+    btnContainer.appendChild(saveBtn);
+    btnContainer.appendChild(cancelEditBtn);
+    
+    contentDiv.appendChild(textarea);
+    contentDiv.appendChild(btnContainer);
+    
+    saveBtn.addEventListener('click', () => {
+        const newText = textarea.value.trim();
+        if (newText && newText !== originalContent) {
+            messageDiv.classList.remove('editing');
+            vscode.postMessage({ type: 'editMessage', text: newText });
+        } else {
+            messageDiv.classList.remove('editing');
+            contentDiv.innerHTML = oldHTML;
+        }
+    });
+    
+    cancelEditBtn.addEventListener('click', () => {
+        messageDiv.classList.remove('editing');
+        contentDiv.innerHTML = oldHTML;
+    });
+}
+
+function createMessageActions(role, rawContent, messageDiv, contentDiv) {
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'message-actions';
+    
+    // 复制按钮 - 图标形式
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'action-btn copy-msg-btn';
+    copyBtn.innerHTML = '📋';
+    copyBtn.title = '复制内容';
+    copyBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        try {
+            await navigator.clipboard.writeText(rawContent);
+            copyBtn.innerHTML = '✅';
+            copyBtn.style.opacity = '1';
+            setTimeout(() => {
+                copyBtn.innerHTML = '📋';
+            }, 1500);
+        } catch (err) {
+            copyBtn.innerHTML = '❌';
+            setTimeout(() => {
+                copyBtn.innerHTML = '📋';
+            }, 1500);
+        }
+    });
+    actionsDiv.appendChild(copyBtn);
+    
+    // 用户消息：编辑按钮
+    if (role === 'user') {
+        const editBtn = document.createElement('button');
+        editBtn.className = 'action-btn edit-msg-btn';
+        editBtn.innerHTML = '✏️';
+        editBtn.title = '编辑消息';
+        editBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            enterEditMode(messageDiv, contentDiv, rawContent);
+        });
+        actionsDiv.appendChild(editBtn);
+    }
+    
+    // 助手消息：重新生成按钮
+    if (role === 'assistant') {
+        const regenBtn = document.createElement('button');
+        regenBtn.className = 'action-btn regen-msg-btn';
+        regenBtn.innerHTML = '🔄';
+        regenBtn.title = '重新生成';
+        regenBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            vscode.postMessage({ type: 'regenerate' });
+        });
+        actionsDiv.appendChild(regenBtn);
+    }
+    
+    return actionsDiv;
+}
+
+// 修改原有的 addMessageToUI 函数，确保正确添加 actions
+function addMessageToUI(role, content) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `${role}-message`;
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    
+    // 存储原始内容用于编辑/复制
+    messageDiv.setAttribute('data-raw-content', content);
+    
+    if (role === 'assistant' && (content.includes('def ') || content.includes('class ') || content.includes('import ') || content.includes('    '))) {
+        contentDiv.innerHTML = renderCodeBlock(content, 'python');
+    } else {
+        contentDiv.innerHTML = formatMarkdown(content);
+    }
+    
+    messageDiv.appendChild(contentDiv);
+    
+    // 注入底部工具栏（图标形式）
+    if (role === 'user' || role === 'assistant') {
+        const actions = createMessageActions(role, content, messageDiv, contentDiv);
+        messageDiv.appendChild(actions);
+    }
+    
+    messagesContainer.appendChild(messageDiv);
+    scrollToBottom();
+}
+
 // 添加消息到UI
 function addMessageToUI(role, content) {
     const messageDiv = document.createElement('div');
@@ -10,14 +163,21 @@ function addMessageToUI(role, content) {
     
     const contentDiv = document.createElement('div');
     contentDiv.className = 'message-content';
-    // 检测是否是代码（包含 def/class/import 或缩进特征）
+    
     if (role === 'assistant' && (content.includes('def ') || content.includes('class ') || content.includes('import ') || content.includes('    '))) {
-        contentDiv.innerHTML = `<pre><code class="language-python">${escapeHtml(content)}</code></pre>`;
+        contentDiv.innerHTML = renderCodeBlock(content, 'python');
     } else {
-        contentDiv.textContent = content;
+        contentDiv.innerHTML = formatMarkdown(content);
     }
     
     messageDiv.appendChild(contentDiv);
+    
+    // 注入底层交互工具栏
+    if (role === 'user' || role === 'assistant') {
+        const actions = createMessageActions(role, content, messageDiv, contentDiv);
+        messageDiv.appendChild(actions);
+    }
+    
     messagesContainer.appendChild(messageDiv);
     scrollToBottom();
 }
@@ -46,7 +206,7 @@ function updateStreamingMessage(id, content, isCode) {
     
     const contentDiv = messageDiv.querySelector('.message-content');
     if (isCode || content.includes('def ') || content.includes('class ')) {
-        contentDiv.innerHTML = `<pre><code class="language-python">${escapeHtml(content)}</code></pre>`;
+        contentDiv.innerHTML = renderCodeBlock(content, 'python');
     } else {
         contentDiv.innerHTML = formatMarkdown(content);
     }
@@ -60,13 +220,19 @@ function finalizeStreamingMessage(id, content) {
     if (!messageDiv) return;
     
     messageDiv.classList.remove('streaming');
+    messageDiv.setAttribute('data-raw-content', content);
+    
     const contentDiv = messageDiv.querySelector('.message-content');
-    // 最终确定时也检测代码
+    
     if (content.includes('def ') || content.includes('class ') || content.includes('import ')) {
-        contentDiv.innerHTML = `<pre><code class="language-python">${escapeHtml(content)}</code></pre>`;
+        contentDiv.innerHTML = renderCodeBlock(content, 'python');
     } else {
         contentDiv.innerHTML = formatMarkdown(content);
     }
+    
+    // 异步完成后加载操作工具栏（图标形式）
+    const actions = createMessageActions('assistant', content, messageDiv, contentDiv);
+    messageDiv.appendChild(actions);
     
     scrollToBottom();
 }
@@ -81,19 +247,24 @@ function showDesignProposal(messageId, content) {
     }
 }
 
-// 简单的 Markdown 格式化
+// 简单的 Markdown 格式化升级（适配独占代码块复制）
 function formatMarkdown(text) {
-    // 代码块
+    // 3. 代码块单独复制核心匹配逻辑
     text = text.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
-        return `<pre><code>${escapeHtml(code)}</code></pre>`;
+        return `
+        <div class="code-block-wrapper">
+            <div class="code-block-header">
+                <span>${lang || 'code'}</span>
+                <span class="copy-code-btn" onclick="window.copyCodeBlock(this)">📋 复制</span>
+            </div>
+            <pre style="margin: 0; border: none; border-radius: 0;"><code class="language-${lang || 'text'}">${escapeHtml(code)}</code></pre>
+        </div>`;
     });
     
     // 行内代码
     text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
-    
     // 粗体
     text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    
     // 换行
     text = text.replace(/\n/g, '<br>');
     
@@ -117,7 +288,6 @@ function showCancelButton(show) {
 
 function clearMessages() {
     messagesContainer.innerHTML = '';
-    // 重新添加欢迎消息
     const welcomeDiv = document.createElement('div');
     welcomeDiv.className = 'welcome-message';
     welcomeDiv.innerHTML = `
@@ -134,7 +304,7 @@ userInput.addEventListener('input', function() {
     this.style.height = Math.min(this.scrollHeight, 200) + 'px';
 });
 
-// 发送消息（Enter发送，Shift+Enter换行）
+// 发送消息
 userInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -143,12 +313,10 @@ userInput.addEventListener('keydown', (e) => {
 });
 
 sendBtn.addEventListener('click', sendMessage);
+// 5. 停止生成绑定
 cancelBtn.addEventListener('click', () => vscode.postMessage({ type: 'cancelGeneration' }));
-clearHistoryBtn.addEventListener('click', () => {
-    if (confirm('确定要清空所有对话历史吗？')) {
-        vscode.postMessage({ type: 'clearHistory' });
-    }
-});
+
+// 【修改点 6】：移除了旧页面上方没用的 clearHistoryBtn 垃圾桶绑定事件
 
 // 监听来自扩展的消息
 window.addEventListener('message', event => {
@@ -178,12 +346,12 @@ window.addEventListener('message', event => {
             showCancelButton(message.show);
             break;
         case 'loadConversation':
-        if (message.messages) {
-            loadConversation(message.messages);
-        }
-        break;
+            if (message.messages) {
+                loadConversation(message.messages);
+            }
+            break;
         case 'updateConversationList':
-            updateConversationList(message.conversations, message.currentId);
+            updateConversationList(message.conversations);
             break;
     }
 });
@@ -194,30 +362,43 @@ function addFileUploadUI() {
     const inputContainer = document.querySelector('.input-container');
     const textarea = document.getElementById('userInput');
     
-    const fileBar = document.createElement('div');
-    fileBar.className = 'file-upload-bar';
-    fileBar.innerHTML = `
-        <button id="uploadFileBtn" class="file-btn" title="上传文件">📎</button>
-        <span id="fileNameDisplay" class="file-name-display"></span>
-        <button id="clearFileBtn" class="clear-file-btn" style="display:none;" title="移除文件">✖</button>
+    // 创建一个更紧凑的文件指示器
+    const fileIndicator = document.createElement('div');
+    fileIndicator.className = 'file-indicator';
+    fileIndicator.style.display = 'none';
+    fileIndicator.innerHTML = `
+        <span class="file-badge">📎 <span id="fileCount">0</span> 个文件待发送</span>
+        <button id="clearFileBtn" class="clear-file-icon" title="清除文件">✖</button>
     `;
     
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.id = 'fileInput';
     fileInput.style.display = 'none';
-    fileInput.multiple = true; // 【修改点】：允许选择多个文件
+    fileInput.multiple = true;
     fileInput.accept = '.txt,.py,.java,.js,.ts,.json,.md,.csv';
     
-    inputContainer.insertBefore(fileBar, textarea);
+    // 添加一个文件按钮在输入框旁边
+    const attachBtn = document.createElement('button');
+    attachBtn.className = 'attach-file-btn';
+    attachBtn.innerHTML = '📎';
+    attachBtn.title = '附加文件';
+    attachBtn.addEventListener('click', () => { fileInput.click(); });
+    
+    // 将按钮放在输入框附近
+    const inputWrapper = document.createElement('div');
+    inputWrapper.className = 'input-wrapper';
+    textarea.parentNode.insertBefore(inputWrapper, textarea);
+    inputWrapper.appendChild(textarea);
+    inputWrapper.appendChild(attachBtn);
+    
+    inputContainer.insertBefore(fileIndicator, inputWrapper);
     inputContainer.appendChild(fileInput);
     
-    document.getElementById('uploadFileBtn').addEventListener('click', () => { fileInput.click(); });
-    document.getElementById('clearFileBtn').addEventListener('click', () => { clearSelectedFile(); });
+    document.getElementById('clearFileBtn')?.addEventListener('click', () => { clearSelectedFile(); });
     fileInput.addEventListener('change', handleFileSelect);
 }
 
-// 【修改点】：循环处理多个文件
 async function handleFileSelect(event) {
     const files = event.target.files;
     if (!files || files.length === 0) return;
@@ -237,57 +418,69 @@ async function handleFileSelect(event) {
                     content: e.target.result,
                     size: file.size
                 });
-                addMessageToUI('system', `📎 已添加文件: ${file.name} (${(file.size/1024).toFixed(1)} KB)`);
                 resolve();
             };
             reader.readAsText(file, 'UTF-8');
         });
     }
     
-    const fileNameDisplay = document.getElementById('fileNameDisplay');
-    const clearBtn = document.getElementById('clearFileBtn');
-    fileNameDisplay.textContent = `📎 已选择 ${pendingFiles.length} 个文件`;
-    clearBtn.style.display = 'inline-block';
+    updateFileIndicator();
+}
+
+
+
+function updateFileIndicator() {
+    const indicator = document.querySelector('.file-indicator');
+    const fileCountSpan = document.getElementById('fileCount');
+    
+    if (pendingFiles.length > 0) {
+        indicator.style.display = 'flex';
+        if (fileCountSpan) {
+            fileCountSpan.textContent = pendingFiles.length;
+        }
+    } else {
+        indicator.style.display = 'none';
+    }
 }
 
 function clearSelectedFile() {
-    pendingFiles = []; // 【修改点】：清空数组
-    const fileNameDisplay = document.getElementById('fileNameDisplay');
-    const clearBtn = document.getElementById('clearFileBtn');
+    pendingFiles = [];
+    updateFileIndicator();
     const fileInput = document.getElementById('fileInput');
-    
-    fileNameDisplay.textContent = '';
-    clearBtn.style.display = 'none';
     if (fileInput) fileInput.value = '';
 }
 
 function sendMessage() {
     const text = userInput.value.trim();
-    
     if (!text && pendingFiles.length === 0) return;
     
-    // 【修改点】：删除了这里主动调用的 addMessageToUI('user', ...)，全权交由后端确认后再返回渲染指令
+    // 如果有文件，显示提示消息
+    if (pendingFiles.length > 0) {
+        const fileNames = pendingFiles.map(f => f.name).join(', ');
+        addMessageToUI('system', `📎 正在处理 ${pendingFiles.length} 个文件: ${fileNames}`);
+    }
+    
+    const messageText = text || (pendingFiles.length > 0 ? `请分析以下 ${pendingFiles.length} 个文件的内容` : '');
     
     userInput.value = '';
     userInput.style.height = 'auto';
     
     vscode.postMessage({ 
         type: 'sendMessage', 
-        text: text || '',
-        files: pendingFiles.length > 0 ? pendingFiles : [] // 【修改点】：传出数组
+        text: messageText,
+        files: pendingFiles.length > 0 ? pendingFiles : []
     });
     
     showCancelButton(true);
     clearSelectedFile();
 }
 
-// 初始化时添加上传UI
+initConversationSidebar();
 window.addEventListener('DOMContentLoaded', () => {
     addFileUploadUI();
 });
 
 function initConversationSidebar() {
-    // 创建侧边栏按钮
     const header = document.querySelector('.chat-header');
     const newChatBtn = document.createElement('button');
     newChatBtn.className = 'icon-btn';
@@ -296,7 +489,6 @@ function initConversationSidebar() {
     newChatBtn.onclick = () => vscode.postMessage({ type: 'newConversation' });
     header.appendChild(newChatBtn);
     
-    // 创建对话列表侧边栏
     const sidebar = document.createElement('div');
     sidebar.id = 'conversationSidebar';
     sidebar.className = 'conversation-sidebar';
@@ -310,7 +502,6 @@ function initConversationSidebar() {
     
     document.body.insertBefore(sidebar, document.querySelector('.chat-container'));
     
-    // 添加侧边栏切换按钮
     const toggleSidebarBtn = document.createElement('button');
     toggleSidebarBtn.className = 'icon-btn';
     toggleSidebarBtn.innerHTML = '☰';
@@ -318,7 +509,6 @@ function initConversationSidebar() {
     toggleSidebarBtn.onclick = () => toggleConversationSidebar();
     header.insertBefore(toggleSidebarBtn, header.firstChild);
     
-    // 关闭按钮事件
     document.getElementById('closeSidebarBtn')?.addEventListener('click', () => {
         toggleConversationSidebar(false);
     });
@@ -344,7 +534,6 @@ function updateConversationList(conversations) {
         </div>
     `).join('');
     
-    // 绑定点击事件
     container.querySelectorAll('.conversation-item').forEach(item => {
         const id = item.dataset.id;
         item.addEventListener('click', (e) => {
@@ -357,40 +546,17 @@ function updateConversationList(conversations) {
         const deleteBtn = item.querySelector('.delete-conv-btn');
         deleteBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
-            // 直接向后端发送删除指令
             vscode.postMessage({ type: 'deleteConversation', conversationId: id });
         });
     });
 }
 
 function loadConversation(messages) {
-    // 清空消息容器
     messagesContainer.innerHTML = '';
-    
-    // 重新加载所有消息
     messages.forEach(msg => {
         addMessageToUI(msg.role, msg.content);
     });
-    
     scrollToBottom();
 }
 
-// 修改消息监听
-window.addEventListener('message', event => {
-    const message = event.data;
-    switch (message.type) {
-        // ... 现有 case
-        case 'updateConversationList':
-            updateConversationList(message.conversations);
-            break;
-        case 'loadConversation':
-            loadConversation(message.messages);
-            break;
-        case 'clearMessages':
-            messagesContainer.innerHTML = '';
-            break;
-    }
-});
-
-// 初始化
-initConversationSidebar();
+vscode.postMessage({ type: 'webviewReady' });
