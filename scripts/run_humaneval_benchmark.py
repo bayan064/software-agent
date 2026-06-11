@@ -4,7 +4,6 @@ import os
 import sys
 import json
 import argparse
-from convert_humaneval import prepare_benchmark_data
 
 # 获取当前脚本所在目录（项目根目录）
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -13,6 +12,15 @@ MAIN_PATH = os.path.join(BASE_DIR, "main.py")
 
 print(f"📌 项目根目录: {BASE_DIR}")
 print(f"📌 使用 Python 解释器: {VENV_PYTHON}")
+
+
+def get_converter(language: str):
+    """根据语言动态导入对应的转换器"""
+    if language.lower() == "python":
+        from convert_humaneval_python import prepare_benchmark_data
+    else:
+        from convert_humaneval_java import prepare_benchmark_data
+    return prepare_benchmark_data
 
 
 def find_generated_code_file(output_dir: str, language: str) -> str:
@@ -30,15 +38,13 @@ def find_generated_code_file(output_dir: str, language: str) -> str:
         try:
             files = os.listdir(path)
             if language.lower() == "python":
-                # 优先查找 solution.py
                 for f in files:
                     if f.lower() == 'solution.py':
                         return os.path.join(path, f)
                 for f in files:
                     if f.endswith('.py') and 'test' not in f.lower():
                         return os.path.join(path, f)
-            else:  # Java
-                # 优先查找 Solution.java
+            else:
                 for f in files:
                     if f == 'Solution.java':
                         return os.path.join(path, f)
@@ -89,36 +95,38 @@ def evaluate_solution_python(solution_code_path, eval_json_path, entry_point):
 
 
 def evaluate_solution_java(solution_code_path, eval_json_path):
-    """Java 版本的验证器 - 使用 executor.py 中的编译和运行逻辑"""
+    """Java 版本的验证器"""
     if not os.path.exists(solution_code_path):
         return False, "未找到代码文件"
     
     try:
-        # 导入 Java 测试运行器
-        from tools.executor import run_java_tests
+        # 确保 tools 目录在路径中
+        tools_path = os.path.join(BASE_DIR, "tools")
+        if tools_path not in sys.path:
+            sys.path.insert(0, tools_path)
         
-        # 直接运行 Java 测试（run_java_tests 会处理编译和执行）
+        from executor import run_java_tests
+        
         result = run_java_tests(solution_code_path)
         
         if result['returncode'] == 0 and result['failed'] == 0:
-            return True, f"✅ 通过官方用例 (passed={result['passed']}, failed={result['failed']})"
+            return True, f"✅ 通过官方用例"
         else:
-            return False, f"❌ 测试失败: passed={result['passed']}, failed={result['failed']}"
+            return False, f"❌ 测试失败"
             
     except Exception as e:
         return False, f"💥 Java 测试执行错误: {str(e)}"
 
 
 def evaluate_solution(solution_code_path, eval_json_path, entry_point, language):
-    """统一的验证器入口，根据语言分发"""
+    """统一的验证器入口"""
     if language.lower() == "python":
         return evaluate_solution_python(solution_code_path, eval_json_path, entry_point)
-    else:  # java
+    else:
         return evaluate_solution_java(solution_code_path, eval_json_path)
 
 
 def main():
-    # 添加命令行参数解析
     parser = argparse.ArgumentParser(description='HumanEval 基准测试')
     parser.add_argument('--language', type=str, default='python', 
                         choices=['python', 'java'], 
@@ -127,9 +135,16 @@ def main():
                         help='测试题目数量')
     args = parser.parse_args()
     
-    # 初始化数据
+    # 根据语言获取对应的转换器
+    prepare_func = get_converter(args.language)
+    
     print(f"🚀 正在初始化 HumanEval {args.limit}题 测试数据集 (语言: {args.language})...")
-    test_cases = prepare_benchmark_data(limit=args.limit, language=args.language)
+    
+    # 调用对应的转换器
+    if args.language == "python":
+        test_cases = prepare_func(limit=args.limit)
+    else:
+        test_cases = prepare_func(limit=args.limit, language=args.language)
 
     language = args.language
     results = []
@@ -146,15 +161,12 @@ def main():
             os.path.join(BASE_DIR, "outputs", "benchmark_results", language, clean_id)
         )
 
-        # 确保系统环境带上强制编码标识
         current_env = os.environ.copy()
         current_env["PYTHONIOENCODING"] = "utf-8"
 
-        # 1. 运行智能体图网络
         try:
             print("   🤖 智能体正在全生命周期运转中，请稍候...")
             
-            # 将语言参数转换为 main.py 接受的格式（Python/Java）
             main_language = "Python" if language == "python" else "Java"
             
             result = subprocess.run(
@@ -193,7 +205,6 @@ def main():
             results.append((clean_id, False, str(e)))
             continue
 
-        # 2. 评测系统接管：检查智能体产出的代码
         solution_file = find_generated_code_file(output_dir, language)
 
         with open(eval_path, 'r', encoding='utf-8') as f:
@@ -210,19 +221,21 @@ def main():
             print(f"   🎯 最终判题结论: ❌ 失败 ({msg})")
             results.append((clean_id, False, msg))
 
-    # 3. 打印最终总报告
-    print(f"\n{'='*70}\n📊 HumanEval ({args.limit}题) 项目需求→设计→代码→测试→修复 最终通过率报告\n{'='*70}")
+    print(f"\n{'='*70}\n📊 HumanEval ({args.limit}题) 最终通过率报告\n{'='*70}")
     for idx, (name, status_bool, detail) in enumerate(results):
         status_str = "✅ 通过" if status_bool else "❌ 失败"
         print(f"[{idx+1:02d}] 任务: {name:<15} | 结果: {status_str:<5} | 详情: {detail}")
 
-    accuracy = (passed_count / len(test_cases)) * 100
-    print(f"{'='*70}")
-    print("📈 最终效能核心指标 (Metrics):")
-    print(f"   - 总抽样题数: {len(test_cases)}")
-    print(f"   - 完美交付数: {passed_count}")
-    print(f"   - 转化通过率 (Pass Rate): {accuracy:.2f}%")
-    print(f"{'='*70}")
+    if len(test_cases) > 0:
+        accuracy = (passed_count / len(test_cases)) * 100
+        print(f"{'='*70}")
+        print("📈 最终效能核心指标 (Metrics):")
+        print(f"   - 总抽样题数: {len(test_cases)}")
+        print(f"   - 完美交付数: {passed_count}")
+        print(f"   - 转化通过率 (Pass Rate): {accuracy:.2f}%")
+        print(f"{'='*70}")
+    else:
+        print("❌ 没有成功加载任何测试用例")
 
 
 if __name__ == "__main__":
