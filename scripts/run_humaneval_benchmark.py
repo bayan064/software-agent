@@ -3,6 +3,7 @@ import subprocess
 import os
 import sys
 import json
+import argparse
 from convert_humaneval import prepare_benchmark_data
 
 # 获取当前脚本所在目录（项目根目录）
@@ -14,9 +15,8 @@ print(f"📌 项目根目录: {BASE_DIR}")
 print(f"📌 使用 Python 解释器: {VENV_PYTHON}")
 
 
-def find_generated_code_file(output_dir: str) -> str:
+def find_generated_code_file(output_dir: str, language: str) -> str:
     """查找智能体生成的代码文件"""
-    # 兼容处理：检查直接输出目录，或者智能体自建的子目录
     search_paths = [output_dir]
     if os.path.exists(output_dir):
         for item in os.listdir(output_dir):
@@ -29,21 +29,29 @@ def find_generated_code_file(output_dir: str) -> str:
             continue
         try:
             files = os.listdir(path)
-            # 优先精确查找 solution.py
-            for f in files:
-                if f.lower() == 'solution.py':
-                    return os.path.join(path, f)
-            # 其次查找任何包含业务代码的 python 文件 (排除测试文件)
-            for f in files:
-                if f.endswith('.py') and 'test' not in f.lower():
-                    return os.path.join(path, f)
+            if language.lower() == "python":
+                # 优先查找 solution.py
+                for f in files:
+                    if f.lower() == 'solution.py':
+                        return os.path.join(path, f)
+                for f in files:
+                    if f.endswith('.py') and 'test' not in f.lower():
+                        return os.path.join(path, f)
+            else:  # Java
+                # 优先查找 Solution.java
+                for f in files:
+                    if f == 'Solution.java':
+                        return os.path.join(path, f)
+                for f in files:
+                    if f.endswith('.java') and 'Test' not in f:
+                        return os.path.join(path, f)
         except Exception:
             pass
     return None
 
 
-def evaluate_solution(solution_code_path, eval_json_path, entry_point):
-    """运行官方 HumanEval 测试用例检验最终代码"""
+def evaluate_solution_python(solution_code_path, eval_json_path, entry_point):
+    """Python 版本的验证器"""
     if not os.path.exists(solution_code_path):
         return False, "未找到代码文件"
 
@@ -56,15 +64,12 @@ def evaluate_solution(solution_code_path, eval_json_path, entry_point):
 
         test_script = eval_data["test"]
 
-        # 构造执行隔离沙箱环境
         exec_globals = {}
         exec(code, exec_globals)
 
-        # 建立映射
         if entry_point in exec_globals:
             exec_globals["candidate"] = exec_globals[entry_point]
         else:
-            # 兜底尝试查找模糊匹配的函数
             found = None
             for key in exec_globals:
                 if callable(exec_globals[key]) and not key.startswith('__'):
@@ -75,7 +80,6 @@ def evaluate_solution(solution_code_path, eval_json_path, entry_point):
             else:
                 return False, f"代码中未找到入口函数: {entry_point}"
 
-        # 运行官方盲测用例断言
         exec(test_script, exec_globals)
         return True, "✅ 通过官方用例"
     except AssertionError:
@@ -84,12 +88,50 @@ def evaluate_solution(solution_code_path, eval_json_path, entry_point):
         return False, f"💥 运行时错误: {str(e)}"
 
 
-def main():
-    # 初始化数据
-    print("🚀 正在初始化 HumanEval 10题 测试数据集...")
-    test_cases = prepare_benchmark_data(limit=10)
+def evaluate_solution_java(solution_code_path, eval_json_path):
+    """Java 版本的验证器 - 使用 executor.py 中的编译和运行逻辑"""
+    if not os.path.exists(solution_code_path):
+        return False, "未找到代码文件"
+    
+    try:
+        # 导入 Java 测试运行器
+        from tools.executor import run_java_tests
+        
+        # 直接运行 Java 测试（run_java_tests 会处理编译和执行）
+        result = run_java_tests(solution_code_path)
+        
+        if result['returncode'] == 0 and result['failed'] == 0:
+            return True, f"✅ 通过官方用例 (passed={result['passed']}, failed={result['failed']})"
+        else:
+            return False, f"❌ 测试失败: passed={result['passed']}, failed={result['failed']}"
+            
+    except Exception as e:
+        return False, f"💥 Java 测试执行错误: {str(e)}"
 
-    language = "Python"
+
+def evaluate_solution(solution_code_path, eval_json_path, entry_point, language):
+    """统一的验证器入口，根据语言分发"""
+    if language.lower() == "python":
+        return evaluate_solution_python(solution_code_path, eval_json_path, entry_point)
+    else:  # java
+        return evaluate_solution_java(solution_code_path, eval_json_path)
+
+
+def main():
+    # 添加命令行参数解析
+    parser = argparse.ArgumentParser(description='HumanEval 基准测试')
+    parser.add_argument('--language', type=str, default='python', 
+                        choices=['python', 'java'], 
+                        help='编程语言 (python/java)')
+    parser.add_argument('--limit', type=int, default=10, 
+                        help='测试题目数量')
+    args = parser.parse_args()
+    
+    # 初始化数据
+    print(f"🚀 正在初始化 HumanEval {args.limit}题 测试数据集 (语言: {args.language})...")
+    test_cases = prepare_benchmark_data(limit=args.limit, language=args.language)
+
+    language = args.language
     results = []
     passed_count = 0
 
@@ -104,29 +146,31 @@ def main():
             os.path.join(BASE_DIR, "outputs", "benchmark_results", language, clean_id)
         )
 
-        # 确保系统环境带上强制强制编码标识
+        # 确保系统环境带上强制编码标识
         current_env = os.environ.copy()
         current_env["PYTHONIOENCODING"] = "utf-8"
 
-        # 1. 运行智能体图网络（需求 -> 设计 -> 代码 -> 测试 -> 修复）
+        # 1. 运行智能体图网络
         try:
             print("   🤖 智能体正在全生命周期运转中，请稍候...")
+            
+            # 将语言参数转换为 main.py 接受的格式（Python/Java）
+            main_language = "Python" if language == "python" else "Java"
+            
             result = subprocess.run(
-                [VENV_PYTHON, MAIN_PATH, "--input", req_path, "--output", output_dir, "--language", language],
+                [VENV_PYTHON, MAIN_PATH, "--input", req_path, "--output", output_dir, "--language", main_language],
                 cwd=BASE_DIR,
-                capture_output=True,  # 捕获二进制流 bytes
-                text=False,           # 🔥 关闭纯文本捕获，防止读取线程遇到中文系统错误码时崩溃
+                capture_output=True,
+                text=False,
                 timeout=180,
                 env=current_env
             )
 
-            # 🔥 采用宽容解码模式（对无法识别的字节用 ? 替代，确保主流程畅通无阻）
             stdout_str = result.stdout.decode('utf-8', errors='replace')
             stderr_str = result.stderr.decode('utf-8', errors='replace')
 
             print(f"   📊 智能体执行结束，退出码: {result.returncode}")
 
-            # 如果退出码不为 0 或者没有成功生成代码，把日志打印出来看看智能体到底在卡在哪里
             if result.returncode != 0:
                 print("   ⚠️ --- 智能体内部执行拦截日志 ---")
                 if stderr_str.strip():
@@ -150,13 +194,13 @@ def main():
             continue
 
         # 2. 评测系统接管：检查智能体产出的代码
-        solution_file = find_generated_code_file(output_dir)
+        solution_file = find_generated_code_file(output_dir, language)
 
         with open(eval_path, 'r', encoding='utf-8') as f:
             eval_data = json.load(f)
             entry_point = eval_data.get("entry_point", "")
 
-        is_correct, msg = evaluate_solution(solution_file, eval_path, entry_point)
+        is_correct, msg = evaluate_solution(solution_file, eval_path, entry_point, language)
 
         if is_correct:
             print(f"   🎯 最终判题结论: {msg}")
@@ -167,7 +211,7 @@ def main():
             results.append((clean_id, False, msg))
 
     # 3. 打印最终总报告
-    print(f"\n{'='*70}\n📊 HumanEval (10题) 项目需求→设计→代码→测试→修复 最终通过率报告\n{'='*70}")
+    print(f"\n{'='*70}\n📊 HumanEval ({args.limit}题) 项目需求→设计→代码→测试→修复 最终通过率报告\n{'='*70}")
     for idx, (name, status_bool, detail) in enumerate(results):
         status_str = "✅ 通过" if status_bool else "❌ 失败"
         print(f"[{idx+1:02d}] 任务: {name:<15} | 结果: {status_str:<5} | 详情: {detail}")
