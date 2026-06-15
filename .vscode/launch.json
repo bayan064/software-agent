@@ -16,6 +16,31 @@
                 "${workspaceFolder}/extension/out/**/*.js"
             ],
             "preLaunchTask": "${defaultBuildTask}"
+        },
+        {
+            "name": "Python: Run server.py",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/server.py",
+            "console": "integratedTerminal",
+            "env": {
+                "DEEPSEEK_API_KEY": "${env:DEEPSEEK_API_KEY}"
+            }
+        },
+        {
+            "name": "Docker: Attach to Python",
+            "type": "python",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "/app"
+                }
+            ]
         }
     ]
 }

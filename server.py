@@ -2,6 +2,7 @@
 import uvicorn
 import json  # 新增
 import asyncio  # 新增
+import os
 from typing import List, Dict
 
 from typing import List, Dict
@@ -97,4 +98,6 @@ async def generate(request: Request):
     }
 
 if __name__ == "__main__":
-    uvicorn.run(api, host="0.0.0.0", port=8000)
+    host = os.environ.get("API_HOST", "0.0.0.0")
+    port = int(os.environ.get("API_PORT", "8000"))
+    uvicorn.run(api, host=host, port=port)
