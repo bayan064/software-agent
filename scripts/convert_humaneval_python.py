@@ -1,4 +1,4 @@
-# convert_humaneval.py
+# convert_humaneval_python.py
 import os
 import json
 import urllib.request
