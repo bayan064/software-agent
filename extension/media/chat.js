@@ -293,22 +293,25 @@ function showDesignProposal(messageId, content) {
 }
 
 function formatMarkdown(text) {
+    if (!text) return '';
+    
     // 1. 代码块（优先处理，避免被其他规则破坏）
     text = text.replace(
         /```(\w*)\n([\s\S]*?)```/g,
         (match, lang, code) => renderCodeBlock(code, lang || 'text')
     );
     
-    // 2. 标题（支持 #、##、###）
-    text = text.replace(/^### (.*)$/gm, '<h3 style="font-size: 14px; font-weight: 600; margin: 8px 0 4px 0;">$1</h3>');
-    text = text.replace(/^## (.*)$/gm, '<h2 style="font-size: 16px; font-weight: 600; margin: 12px 0 6px 0;">$1</h2>');
-    text = text.replace(/^# (.*)$/gm, '<h1 style="font-size: 18px; font-weight: 700; margin: 16px 0 8px 0;">$1</h1>');
+    // 2. 标题（支持 #、##、###、####）- 修复：不要求空格
+    text = text.replace(/^####\s*(.*)$/gm, '<h4 style="font-size: 13px; font-weight: 600; margin: 10px 0 4px 0; color: var(--vscode-editor-foreground);">$1</h4>');
+    text = text.replace(/^###\s*(.*)$/gm, '<h3 style="font-size: 14px; font-weight: 600; margin: 12px 0 6px 0; color: var(--vscode-editor-foreground);">$1</h3>');
+    text = text.replace(/^##\s*(.*)$/gm, '<h2 style="font-size: 16px; font-weight: 600; margin: 14px 0 8px 0; color: var(--vscode-editor-foreground); border-bottom: 1px solid var(--vscode-panel-border); padding-bottom: 4px;">$1</h2>');
+    text = text.replace(/^#\s*(.*)$/gm, '<h1 style="font-size: 18px; font-weight: 700; margin: 16px 0 10px 0; color: var(--vscode-editor-foreground);">$1</h1>');
     
-    // 3. 无序列表
-    text = text.replace(/^[\-*] (.*)$/gm, '<li style="margin-left: 20px; list-style-type: disc;">$1</li>');
+    // 3. 无序列表（支持 -、*、•）
+    text = text.replace(/^[\-*•]\s+(.*)$/gm, '<li style="margin-left: 20px; list-style-type: disc; padding: 2px 0;">$1</li>');
     
     // 4. 有序列表
-    text = text.replace(/^\d+\. (.*)$/gm, '<li style="margin-left: 20px; list-style-type: decimal;">$1</li>');
+    text = text.replace(/^\d+\.\s+(.*)$/gm, '<li style="margin-left: 20px; list-style-type: decimal; padding: 2px 0;">$1</li>');
     
     // 5. 粗体
     text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -317,18 +320,47 @@ function formatMarkdown(text) {
     text = text.replace(/\*([^*]+)\*/g, '<em>$1</em>');
     
     // 7. 行内代码
-    text = text.replace(/`([^`]+)`/g, '<code style="background: var(--vscode-textCodeBlock-background); padding: 2px 6px; border-radius: 4px;">$1</code>');
+    text = text.replace(/`([^`]+)`/g, '<code style="background: var(--vscode-textCodeBlock-background); padding: 2px 6px; border-radius: 4px; font-size: 0.9em;">$1</code>');
     
-    // 8. 换行（保留段落间距）
-    text = text.replace(/\n\n/g, '</p><p style="margin: 4px 0;">');
-    text = text.replace(/\n/g, '<br>');
+    // 8. 将连续的列表项用 <ul> 包裹
+    text = text.replace(/((?:<li[^>]*>.*?<\/li>\s*)+)/g, '<ul style="margin: 4px 0; padding-left: 0; list-style: none;">$1</ul>');
     
-    // 包装段落
-    if (!text.startsWith('<')) {
-        text = '<p style="margin: 4px 0;">' + text + '</p>';
+    // 9. 处理段落
+    const lines = text.split('\n');
+    let result = '';
+    let inList = false;
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        
+        // 检查是否是列表项
+        if (line.startsWith('<li') || line.startsWith('</li>')) {
+            result += line;
+            inList = true;
+            continue;
+        }
+        
+        // 检查是否是标题
+        if (line.startsWith('<h')) {
+            if (inList) inList = false;
+            result += line;
+            continue;
+        }
+        
+        // 检查是否是代码块
+        if (line.startsWith('<div') || line.startsWith('<pre') || line.startsWith('<code')) {
+            if (inList) inList = false;
+            result += line;
+            continue;
+        }
+        
+        // 普通文本，用 <p> 包裹
+        if (inList) inList = false;
+        result += `<p style="margin: 4px 0; line-height: 1.6;">${line}</p>`;
     }
     
-    return text;
+    return result || text;
 }
 
 function escapeHtml(text) {
@@ -749,121 +781,35 @@ function loadConversation(messages) {
     scrollToBottom();
 }
 
-// PlantUML 编码函数（用于生成图片URL）
 function encodePlantUML(text) {
-    // 使用 deflate 压缩 + base64 编码
-    // 这里使用简化的编码方式，实际可以使用 plantuml-encoder 库
-    function encode64(data) {
-        let r = "";
-        for (let i = 0; i < data.length; i += 3) {
-            if (i + 2 === data.length) {
-                r += append3bytes(data[i], data[i + 1], 0);
-            } else if (i + 1 === data.length) {
-                r += append3bytes(data[i], 0, 0);
-            } else {
-                r += append3bytes(data[i], data[i + 1], data[i + 2]);
-            }
-        }
-        return r;
-    }
-    
-    function append3bytes(b1, b2, b3) {
-        let c1 = b1 >> 2;
-        let c2 = ((b1 & 0x3) << 4) | (b2 >> 4);
-        let c3 = ((b2 & 0xF) << 2) | (b3 >> 6);
-        let c4 = b3 & 0x3F;
-        let r = "";
-        r += encode6bit(c1 & 0x3F);
-        r += encode6bit(c2 & 0x3F);
-        r += encode6bit(c3 & 0x3F);
-        r += encode6bit(c4 & 0x3F);
-        return r;
-    }
-    
-    function encode6bit(b) {
-        if (b < 10) {
-            return String.fromCharCode(48 + b);
-        }
-        b -= 10;
-        if (b < 26) {
-            return String.fromCharCode(65 + b);
-        }
-        b -= 26;
-        if (b < 26) {
-            return String.fromCharCode(97 + b);
-        }
-        b -= 26;
-        if (b === 0) {
-            return '-';
-        }
-        if (b === 1) {
-            return '_';
-        }
-        return '?';
-    }
-    
-    // 简化版：使用 pako 库进行压缩
-    // 这里使用标准的 PlantUML 编码
-    try {
-        // 使用 TextEncoder 和 pako（如果可用）
-        const encoder = new TextEncoder();
-        const data = encoder.encode(text);
-        // 这里简化处理，实际应该使用 deflate
-        return encode64(Array.from(data));
-    } catch (e) {
-        console.error('PlantUML 编码失败:', e);
-        return '';
-    }
+    // 直接 URL 编码，最简单可靠
+    return encodeURIComponent(text);
 }
 
-// 渲染 PlantUML 图表
 function renderPlantUML(container) {
     const codeElement = container.querySelector('.plantuml-code code');
     if (!codeElement) return;
     
-    const plantumlCode = codeElement.textContent;
-    if (!plantumlCode.trim() || !plantumlCode.includes('@startuml')) {
+    const plantumlCode = codeElement.textContent.trim();
+    if (!plantumlCode || !plantumlCode.includes('@startuml')) {
         return;
     }
     
-    try {
-        // 使用 URL 编码方式调用 PlantUML 在线服务
-        const encoded = encodeURIComponent(plantumlCode);
-        const imgUrl = `https://www.plantuml.com/plantuml/svg/${encoded}`;
-        
-        const renderDiv = container.querySelector('.plantuml-render');
-        if (renderDiv) {
-            // 清空并添加图片
-            renderDiv.innerHTML = `
-                <img src="${imgUrl}" 
-                     alt="PlantUML 图表" 
-                     class="plantuml-image"
-                     style="max-width: 100%; height: auto;"
-                     onerror="this.style.display='none'; this.parentElement.querySelector('.plantuml-fallback').style.display='block';"
-                />
-                <div class="plantuml-fallback" style="display: none; text-align: left; padding: 12px; background: var(--vscode-editor-background); border-radius: 4px;">
-                    <div style="color: var(--vscode-inputValidation-warningForeground); margin-bottom: 8px;">⚠️ 无法渲染图表，显示原始代码</div>
-                    <pre style="margin: 0; font-size: 12px; overflow-x: auto;">${escapeHtml(plantumlCode)}</pre>
-                </div>
-                <details style="margin-top: 8px;">
-                    <summary style="cursor: pointer; color: var(--vscode-descriptionForeground); font-size: 12px;">📄 查看 PlantUML 源码</summary>
-                    <pre style="margin: 8px 0 0 0; padding: 12px; background: var(--vscode-editor-background); border-radius: 4px; font-size: 12px; overflow-x: auto;">${escapeHtml(plantumlCode)}</pre>
-                </details>
-            `;
-            
-            // 隐藏原始代码块
-            const codeDiv = container.querySelector('.plantuml-code');
-            if (codeDiv) {
-                codeDiv.style.display = 'none';
-            }
-        }
-    } catch (e) {
-        console.error('PlantUML 渲染失败:', e);
-        // 显示原始代码
-        const codeDiv = container.querySelector('.plantuml-code');
-        if (codeDiv) {
-            codeDiv.style.display = 'block';
-        }
+    const renderDiv = container.querySelector('.plantuml-render');
+    if (!renderDiv) return;
+    
+    // 只显示原始代码，不进行渲染
+    renderDiv.innerHTML = `
+        <div style="padding: 12px; background: var(--vscode-editor-background); border-radius: 4px; text-align: left; font-family: var(--vscode-editor-font-family); font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; border: 1px solid var(--vscode-panel-border);">
+            <div style="color: var(--vscode-descriptionForeground); margin-bottom: 8px; font-size: 12px;">📄 PlantUML 源码:</div>
+            ${escapeHtml(plantumlCode)}
+        </div>
+    `;
+    
+    // 隐藏原始代码块
+    const codeDiv = container.querySelector('.plantuml-code');
+    if (codeDiv) {
+        codeDiv.style.display = 'none';
     }
 }
 
@@ -945,10 +891,15 @@ function generateDesignHTML(designData) {
     const classDiagram = designData.architecture || '';
     const activityDiagram = designData.components ? designData.components.join('\n') : '';
     
+    // 修复1：调换escape与formatMarkdown顺序，先markdown渲染，不提前转义破坏语法
+    const rawDesc = designData.description?.trim() || '暂无设计描述';
+    const descriptionHtml = formatMarkdown(rawDesc);
+    
     return `
         <div class="design-proposal">
             <div class="proposal-title">📐 ${escapeHtml(designData.title || '系统设计模型')}</div>
-            <div class="proposal-description">${formatMarkdown(designData.description || '')}</div>
+            <!-- 修复2：追加message-content类，复用已有markdown排版样式 -->
+            <div class="proposal-description message-content">${descriptionHtml}</div>
             
             ${classDiagram ? `
             <div class="proposal-architecture">
