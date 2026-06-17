@@ -14,12 +14,14 @@ api = FastAPI()
 
 class Request(BaseModel):
     requirement: str
-    history: List[Dict[str, str]] = []  # 新增历史消息字段
+    history: List[Dict[str, str]] = []
+    language: str = "Python"
+    task: str = "full"
 
 class DesignRequest(BaseModel):
     design: dict  # 新增
 
-async def stream_response(requirement: str, history: List[Dict[str, str]] = []):
+async def stream_response(requirement: str, history: List[Dict[str, str]] = [], language: str = "Python", task: str = "full"):
     """流式响应生成器，支持历史对话"""
     
     # 构建包含历史的完整需求
@@ -33,6 +35,13 @@ async def stream_response(requirement: str, history: List[Dict[str, str]] = []):
             context += f"{role}: {msg['content']}\n"
         full_requirement = context + f"\n【当前问题】\n{requirement}"
     
+    if task == "design":
+        system_prompt = f"\n\n【重要系统指令】\n当前任务模式：仅设计(UML)。请输出 Markdown 格式的设计文档和 PlantUML 代码，绝对不要生成任何具体的编程语言（如Python/Java）代码。"
+    else:
+        system_prompt = f"\n\n【重要系统指令】\n当前任务模式：{task}。请严格使用【{language}】语言来编写代码。"
+    
+    full_requirement += system_prompt
+
     # 调用 agent
     result = app.invoke({
         "messages": [],
@@ -40,10 +49,63 @@ async def stream_response(requirement: str, history: List[Dict[str, str]] = []):
         "code": "",
         "test_code": "",
         "test_result": {},
-        "requirement": full_requirement
+        "requirement": full_requirement,
+        "language": language, 
+        "task": task
     })
     
     code = result.get("code", "")
+    design_data = result.get("design_models")
+    
+    if not design_data:
+        output_dir = "output"
+
+        design_data = {
+            "text_design": "",
+            "class_diagram": "",
+            "activity_diagram": ""
+        }
+
+        md_file = os.path.join(output_dir, "system_design.md")
+        if os.path.exists(md_file):
+            design_data["text_design"] = open(
+                md_file,
+                "r",
+                encoding="utf-8"
+            ).read()
+
+        class_file = os.path.join(output_dir, "class_diagram.puml")
+        if os.path.exists(class_file):
+            design_data["class_diagram"] = open(
+                class_file,
+                "r",
+                encoding="utf-8"
+            ).read()
+
+        activity_file = os.path.join(output_dir, "activity_diagram.puml")
+        if os.path.exists(activity_file):
+            design_data["activity_diagram"] = open(
+                activity_file,
+                "r",
+                encoding="utf-8"
+            ).read()
+
+    if design_data:
+        # 发送设计提案格式
+        yield f"data: {json.dumps({
+            'type': 'design_proposal',
+            'title': '系统设计模型',
+            'description': design_data.get('text_design', ''),
+            'architecture': design_data.get('class_diagram', ''),
+            'components': [design_data.get('activity_diagram', '')] if design_data.get('activity_diagram') else [],
+            'pending': True
+        })}\n\n"
+        
+        # 如果只需要设计，直接发送完成信号并结束
+        if task == "design":
+            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
     
     # 流式输出代码
     for char in code:
@@ -56,7 +118,7 @@ async def stream_response(requirement: str, history: List[Dict[str, str]] = []):
 @api.post("/stream")
 async def stream_generate(request: Request):
     return StreamingResponse(
-        stream_response(request.requirement, request.history),
+        stream_response(request.requirement, request.history, request.language, request.task),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -89,7 +151,9 @@ async def generate(request: Request):
         "code": "",
         "test_code": "",
         "test_result": {},
-        "requirement": request.requirement
+        "requirement": request.requirement,
+        "language": request.language, 
+        "task": request.task
     })
     return {
         "code": result.get("code"),

@@ -5,11 +5,13 @@ import * as fs from 'fs';
 
 interface Message {
     role: 'user' | 'assistant' | 'system';
-    content: string;       // 依然完整保留送给后端智能体的总上下文内容
-    displayText?: string;  // 【修改点 7】：专门供给前端渲染和编辑的安全文本（纯文字+微标，绝不漏出代码全文）
+    content: string;       
+    displayText?: string;  
     code?: string;
     isStreaming?: boolean;
     designProposal?: DesignProposal;
+    language?: string;
+    task?: string;
 }
 
 interface DesignProposal {
@@ -92,7 +94,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(async (data) => {
             switch (data.type) {
                 case 'sendMessage':
-                    await this._handleUserMessage(data.text, data.files);
+                    await this._handleUserMessage(data.text, data.files, data.language || 'Python', data.task || 'full');
                     break;
                 case 'editMessage': // 【修改点 1】：捕获前端发起的编辑重发指令
                     await this._handleEditMessage(data.text);
@@ -301,6 +303,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         });
     }
 
+    private _sendDesignToWebview(proposal: DesignProposal) {
+        this._view?.webview.postMessage({
+            type: 'renderDesign', // 与 chat.js 中的 case 对应
+            designProposal: proposal
+        });
+    }
+
     // 【修改点 1】：回滚历史记录并替换为最新编辑的文字内容
     private async _handleEditMessage(text: string) {
         const index = this._messages.map(m => m.role).lastIndexOf('user');
@@ -315,8 +324,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                 type: 'loadConversation',
                 messages: this._messages.map(m => ({ role: m.role, content: m.displayText || m.content }))
             });
+            const lastUserMsg = [...this._messages].reverse().find(m => m.role === 'user');
             // 模拟全新指令投递
-            await this._handleUserMessage(text);
+            await this._handleUserMessage(text, undefined, lastUserMsg?.language || 'Python', lastUserMsg?.task || 'full');
         }
     }
 
@@ -335,7 +345,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                 type: 'loadConversation',
                 messages: this._messages.map(m => ({ role: m.role, content: m.displayText || m.content }))
             });
-            await this._streamResponse(lastUserMessage.content);
+            await this._streamResponse(
+                lastUserMessage.content, 
+                lastUserMessage.language || 'Python', 
+                lastUserMessage.task || 'full'
+            );
         }
     }
 
@@ -460,7 +474,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         </html>`;
     }
 
-    private async _handleUserMessage(text: string, files?: { name: string; content: string }[]) {
+    private async _handleUserMessage(text: string, files?: { name: string; content: string }[], language: string = 'Python', task: string = 'full') {
         if (!text.trim() && (!files || files.length === 0)) return;
 
         // 1. 先确定对话是否正式（临时转正式）
@@ -509,7 +523,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         const userMessage: Message = { 
             role: 'user', 
             content: fullRequirement,
-            displayText: displayText
+            displayText: displayText,
+            language: language,
+            task: task
         };
         this._messages.push(userMessage);
 
@@ -544,10 +560,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         });
 
         // 7. 调用后端
-        await this._streamResponse(fullRequirement);
+        await this._streamResponse(fullRequirement, language, task);
     }
 
-    private async _streamResponse(requirement: string) {
+    private async _streamResponse(requirement: string, language: string, task: string) {
         const config = vscode.workspace.getConfiguration('agent-ui');
         const baseUrl = config.get<string>('baseUrl') ?? 'http://127.0.0.1:8000';
         const endpoint = new URL('/stream', baseUrl).toString();
@@ -571,7 +587,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ requirement, history }),
+                body: JSON.stringify({ requirement, history, language: language, task: task }),
                 signal: this._abortController.signal
             });
 
@@ -594,6 +610,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                 const lines = buffer.split('\n');
                 buffer = lines.pop() || '';
 
+                let isDesignMode = task === 'design';  // 标记是否为设计模式
+                let designProcessed = false;           // 标记设计是否已处理
+
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
                         const data = line.slice(6);
@@ -611,16 +630,26 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                                 };
                                 this._pendingDesignProposal = proposal;
                                 this._showDesignProposal(proposal, messageId);
+
+                                designProcessed = true; // 新增
                             } else if (parsed.type === 'code_chunk') {
-                                fullContent += parsed.content;
-                                this._updateStreamingMessage(messageId, fullContent, parsed.isCode);
+                                if (!isDesignMode) {
+                                    fullContent += parsed.content;
+                                    this._updateStreamingMessage(messageId, fullContent, parsed.isCode, language);
+                                }
                             } else if (parsed.type === 'complete') {
                                 assistantMessage.content = fullContent;
                                 assistantMessage.isStreaming = false;
                                 if (parsed.code) {
                                     assistantMessage.code = parsed.code;
                                 }
-                                this._finalizeStreamingMessage(messageId, fullContent);
+                                // 设计模式下不调用 finalize，因为已经通过 showDesignProposal 显示了
+                                if (!isDesignMode) {
+                                    this._finalizeStreamingMessage(messageId, fullContent, language);
+                                } else {
+                                    // 设计模式下只隐藏取消按钮
+                                    this._showCancelButton(false);
+                                }
                             }
                         } catch (e) {
                             console.error('Parse error:', e);
@@ -643,22 +672,32 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
 
     private _showDesignProposal(proposal: DesignProposal, messageId: string) {
+        const classDiagram = proposal.architecture || '';
+        const activityDiagram = proposal.components?.join('\n') || '';
+        
+        // 生成包含 PlantUML 渲染的 HTML（不包含确认/重新设计按钮）
         const proposalHtml = `
             <div class="design-proposal">
                 <div class="proposal-title">📐 ${this._escapeHtml(proposal.title)}</div>
                 <div class="proposal-description">${this._escapeHtml(proposal.description)}</div>
+                
+                ${classDiagram ? `
                 <div class="proposal-architecture">
-                    <strong>架构设计：</strong>
-                    <pre>${this._escapeHtml(proposal.architecture)}</pre>
-                </div>
+                    <strong>类图 (Class Diagram):</strong>
+                    <div class="plantuml-container">
+                        <pre class="plantuml-code"><code>${this._escapeHtml(classDiagram)}</code></pre>
+                        <div class="plantuml-render"></div>
+                    </div>
+                </div>` : ''}
+                
+                ${activityDiagram ? `
                 <div class="proposal-components">
-                    <strong>组件：</strong>
-                    <ul>${proposal.components.map(c => `<li>${this._escapeHtml(c)}</li>`).join('')}</ul>
-                </div>
-                <div class="proposal-actions">
-                    <button class="approve-btn" onclick="vscode.postMessage({type:'approveDesign'})">✅ 确认采用</button>
-                    <button class="reject-btn" onclick="vscode.postMessage({type:'rejectDesign'})">❌ 重新设计</button>
-                </div>
+                    <strong>活动图 (Activity Diagram):</strong>
+                    <div class="plantuml-container">
+                        <pre class="plantuml-code"><code>${this._escapeHtml(activityDiagram)}</code></pre>
+                        <div class="plantuml-render"></div>
+                    </div>
+                </div>` : ''}
             </div>
         `;
         
@@ -680,7 +719,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                 placeHolder: '例如：应该使用 MVC 架构...'
             });
             if (feedback) {
-                await this._streamResponse(`修改设计方案：${feedback}\n原需求：${this._messages[this._messages.length - 2]?.content}`);
+                const lastUserMsg = [...this._messages].reverse().find(m => m.role === 'user');
+                await this._streamResponse(
+                    `修改设计方案：${feedback}\n原需求：${this._messages[this._messages.length - 2]?.content}`,
+                    lastUserMsg?.language || 'Python',
+                    lastUserMsg?.task || 'full'
+                );
             }
         }
         this._pendingDesignProposal = undefined;
@@ -754,7 +798,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     private async _retryLastMessage() {
         const lastUserMessage = [...this._messages].reverse().find(m => m.role === 'user');
         if (lastUserMessage) {
-            await this._streamResponse(lastUserMessage.content);
+            await this._streamResponse(
+                lastUserMessage.content, 
+                lastUserMessage.language || 'Python', 
+                lastUserMessage.task || 'full'
+            );
         }
     }
 
@@ -786,16 +834,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         return id;
     }
 
-    private _updateStreamingMessage(id: string, content: string, isCode: boolean = false) {
+    private _updateStreamingMessage(id: string, content: string, isCode: boolean = false, language: string = 'Python') {
         this._view?.webview.postMessage({
             type: 'updateStreamingMessage',
             id,
             content,
-            isCode
+            isCode,
+            language
         });
     }
 
-    private _finalizeStreamingMessage(id: string, content: string) {
+    private _finalizeStreamingMessage(id: string, content: string, language: string = 'Python') {
         const assistantMessage: Message = { role: 'assistant', content: content };
         const currentConv = this._conversations.find(c => c.id === this._currentConversationId);
         if (currentConv) {
@@ -806,7 +855,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         this._view?.webview.postMessage({
             type: 'finalizeStreamingMessage',
             id,
-            content
+            content,
+            language
         });
         this._showCancelButton(false);
     }
