@@ -92,14 +92,14 @@ async def stream_response(requirement: str, history: List[Dict[str, str]] = [], 
 
     if design_data:
         # 发送设计提案格式
-        yield f"data: {json.dumps({
+        yield f"""data: {json.dumps({
             'type': 'design_proposal',
             'title': '系统设计模型',
             'description': design_data.get('text_design', ''),
             'architecture': design_data.get('class_diagram', ''),
             'components': [design_data.get('activity_diagram', '')] if design_data.get('activity_diagram') else [],
             'pending': True
-        })}\n\n"
+        })}\n\n"""
         
         # 如果只需要设计，直接发送完成信号并结束
         if task == "design":
