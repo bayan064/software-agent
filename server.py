@@ -158,7 +158,8 @@ async def generate(request: Request):
     return {
         "code": result.get("code"),
         "test_code": result.get("test_code"),
-        "test_result": result.get("test_result")
+        "test_result": result.get("test_result"),
+        "design_models": result.get("design_models")
     }
 
 if __name__ == "__main__":
