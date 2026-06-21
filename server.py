@@ -24,16 +24,49 @@ class DesignRequest(BaseModel):
 async def stream_response(requirement: str, history: List[Dict[str, str]] = [], language: str = "Python", task: str = "full"):
     """流式响应生成器，支持历史对话"""
     
-    # 构建包含历史的完整需求
-    full_requirement = requirement
-    
-    # 如果有历史对话，添加到上下文中
+# ===== 核心改动：同时提取用户问题和代码结构 =====
     if history:
-        context = "\n\n【历史对话】\n"
+        user_questions = []
+        code_structures = []  # 记录已有的类/函数名
+        
         for msg in history:
-            role = "用户" if msg["role"] == "user" else "助手"
-            context += f"{role}: {msg['content']}\n"
-        full_requirement = context + f"\n【当前问题】\n{requirement}"
+            if msg["role"] == "user":
+                content = msg.get("content", "").strip()
+                if content:
+                    if len(content) > 200:
+                        content = content[:200] + "..."
+                    user_questions.append(content)
+            
+            elif msg["role"] == "assistant":
+                content = msg.get("content", "").strip()
+                # 提取类名
+                import re
+                class_match = re.search(r'class\s+(\w+)', content)
+                func_match = re.search(r'def\s+(\w+)', content)
+                if class_match:
+                    code_structures.append(f"类: {class_match.group(1)}")
+                if func_match:
+                    code_structures.append(f"函数: {func_match.group(1)}")
+        
+        # 构建上下文
+        full_requirement = ""
+        
+        if user_questions:
+            recent = user_questions[-3:] if len(user_questions) > 3 else user_questions
+            history_context = "\n".join([f"- {q}" for q in recent])
+            full_requirement += f"【历史对话回顾】\n{history_context}\n"
+        
+        if code_structures:
+            # 去重
+            unique_structures = list(set(code_structures))
+            full_requirement += f"\n【之前生成的代码结构】\n"
+            for s in unique_structures:
+                full_requirement += f"- {s}\n"
+            full_requirement += f"\n【重要】请在已有代码结构上新增或修改功能，保持代码一致性。\n"
+        
+        full_requirement += f"\n【当前需求】\n{requirement}"
+    else:
+        full_requirement = requirement
     
     if task == "design":
         system_prompt = f"\n\n【重要系统指令】\n当前任务模式：仅设计(UML)。请输出 Markdown 格式的设计文档和 PlantUML 代码，绝对不要生成任何具体的编程语言（如Python/Java）代码。"
