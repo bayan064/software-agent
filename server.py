@@ -5,7 +5,6 @@ import asyncio  # 新增
 import os
 from typing import List, Dict
 
-from typing import List, Dict
 from fastapi.responses import StreamingResponse  # 新增
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -59,19 +58,19 @@ async def stream_response(requirement: str, history: List[Dict[str, str]] = [], 
         if code_structures:
             # 去重
             unique_structures = list(set(code_structures))
-            full_requirement += f"\n【之前生成的代码结构】\n"
+            full_requirement += "\n【之前生成的代码结构】\n"
             for s in unique_structures:
                 full_requirement += f"- {s}\n"
-            full_requirement += f"\n【重要】请在已有代码结构上新增或修改功能，保持代码一致性。\n"
+            full_requirement += "\n【重要】请在已有代码结构上新增或修改功能，保持代码一致性。\n"
         
         full_requirement += f"\n【当前需求】\n{requirement}"
     else:
         full_requirement = requirement
     
     if task == "design":
-        system_prompt = f"\n\n【重要系统指令】\n当前任务模式：仅设计(UML)。请输出 Markdown 格式的设计文档和 PlantUML 代码，绝对不要生成任何具体的编程语言（如Python/Java）代码。"
+        system_prompt = "\n\n【重要系统指令】\n当前任务模式：仅设计(UML)。请输出 Markdown 格式的设计文档和 PlantUML 代码，绝对不要生成任何具体的编程语言（如Python/Java）代码。"
     else:
-        system_prompt = f"\n\n【重要系统指令】\n当前任务模式：{task}。请严格使用【{language}】语言来编写代码。"
+        system_prompt = "\n\n【重要系统指令】\n当前任务模式：{task}。请严格使用【{language}】语言来编写代码。"
     
     full_requirement += system_prompt
 

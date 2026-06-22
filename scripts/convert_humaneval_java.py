@@ -37,7 +37,7 @@ def prepare_benchmark_data(limit=10, language="python"):
     else:
         print(f"❌ 文件不存在: {jsonl_path} 或 {jsonl_gz_path}")
         print(f"   请将下载的 humaneval_{language}.jsonl 文件放到项目根目录")
-        print(f"   下载地址: https://huggingface.co/datasets/THUDM/humaneval-x/tree/main/data")
+        print("   下载地址: https://huggingface.co/datasets/THUDM/humaneval-x/tree/main/data")
         return []
     
     # 确定路径（按语言区分）

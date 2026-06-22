@@ -384,7 +384,7 @@ def _validate_java_test_code(test_code: str, solution_class_name: str = "Solutio
     if not test_code:
         return False, test_code, "测试代码为空"
     
-    original_code = test_code
+    # original_code = test_code
     fixed = test_code
     
     # 1. 确保有package声明（如果有的话保持原样）

@@ -110,9 +110,9 @@ def evaluate_solution_java(solution_code_path, eval_json_path):
         result = run_java_tests(solution_code_path)
         
         if result['returncode'] == 0 and result['failed'] == 0:
-            return True, f"✅ 通过官方用例"
+            return True, "✅ 通过官方用例"
         else:
-            return False, f"❌ 测试失败"
+            return False, "❌ 测试失败"
             
     except Exception as e:
         return False, f"💥 Java 测试执行错误: {str(e)}"
