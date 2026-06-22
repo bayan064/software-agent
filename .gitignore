@@ -237,6 +237,7 @@ tests/requirements/req_humaneval_*
 tests/eval_references/eval_humaneval_*
 tests/humaneval/requirements/req_humaneval_*
 tests/humaneval/eval_references/eval_humaneval_*
+tests/humaneval/java
 
 # 忽略智能体运行的输出结果
 outputs/benchmark_results/
