@@ -8,6 +8,14 @@
 - Java 17+（如需运行 Java 测试）
 - DeepSeek API Key（从 https://platform.deepseek.com/ 获取）
 
+### 获取代码
+
+**如果要运行 VSCode 插件或 CLI，需要先下载完整代码：**
+
+```bash
+git clone https://github.com/bayan564/software-agent.git
+cd software-agent
+
 ### 安装步骤
 
 ```bash
@@ -93,16 +101,15 @@ output/
 
 ```bash
 cd extension
-npm install
-npx tsc
+npm run compile
 ```
 
 ### 使用步骤
 
 1. 启动后端：`python server.py`
 2. 在 VS Code 中按 `F5` 调试扩展
-3. 打开侧边栏开始对话
-4. 运行命令 `agent-ui: 生成代码`（或 `Ctrl+Alt+G`）
+3. 点击run extension，打开侧边栏的agent-ui图标开始对话
+4. 在对话框里输入需求，支持加入附件，编辑对话，复制，查看历史对话等
 
 ### 扩展功能
 
@@ -117,40 +124,100 @@ npx tsc
 
 ## Docker 部署
 
-### 快速启动
+使用 Docker 可以免去手动配置环境的麻烦，在任意支持 Docker 的平台上一键运行智能体服务。
 
-```bash
-# 1. 配置 API Key
-cp .env.example .env
-# 编辑 .env，填入 DEEPSEEK_API_KEY
-
-# 2. 构建并启动
-docker-compose build
-docker-compose up -d
-
-# 3. 验证
-# 浏览器访问 http://localhost:8000/docs
-```
-
-### 常用命令
-
-```bash
-docker-compose up -d      # 后台启动
-docker-compose logs -f    # 查看日志
-docker-compose down       # 停止服务
-docker-compose restart    # 重启服务
-```
+**前置要求**：Docker 已安装并启动 · DeepSeek API Key（从 https://platform.deepseek.com/ 获取）
 
 ---
 
-## 常见问题
+### 场景一：直接拉取镜像运行（无需下载代码）
+
+
+**1. 获取镜像**
+
+从 Docker Hub 拉取（推荐，需网络）：
+```bash
+docker pull bayan564/software-agent:latest
+```
+
+**2. 启动容器**
+```bash
+docker run -d -p 8000:8000 --name agent \
+  -e DEEPSEEK_API_KEY="你的DeepSeek API密钥" \
+  bayan564/software-agent:latest
+```
+
+**3. 验证服务**
+浏览器访问 `http://localhost:8000/docs`，看到 Swagger 文档页面即表示成功。
+
+---
+
+### 场景二：从源码构建（适合开发者）
+
+
+**1. 克隆代码**
+```bash
+git clone https://github.com/bayan564/software-agent.git
+cd software-agent
+```
+
+**2. 配置 API Key**
+```bash
+cp .env.example .env
+# 编辑 .env，填入 DEEPSEEK_API_KEY
+```
+
+**3. 构建并启动**
+```bash
+docker-compose build
+docker-compose up -d
+```
+
+**4. 验证服务**
+浏览器访问 `http://localhost:8000/docs`，看到 Swagger 文档页面即表示成功。
+
+---
+
+### 镜像信息
+
+本项目镜像已公开推送至 Docker Hub：
+
+| 项目 | 信息 |
+|------|------|
+| 仓库地址 | https://hub.docker.com/r/bayan564/software-agent |
+| 拉取命令 | `docker pull bayan564/software-agent:latest` |
+| 镜像大小 | 约 494MB（压缩后） |
+
+### 常用管理命令
+
+| 操作 | 命令 |
+|------|------|
+| 查看运行状态 | `docker ps` |
+| 查看日志 | `docker logs agent` |
+| 停止容器 | `docker stop agent` |
+| 启动已存在容器 | `docker start agent` |
+| 重启容器 | `docker restart agent` |
+| 删除容器 | `docker rm agent` |
+
+### 常见问题
 
 | 问题 | 解决方案 |
-|-----|---------|
-| `No module named 'openai'` | `pip install openai>=1.3.0` |
-| API Key 无效 | 检查 `.env` 中的 `DEEPSEEK_API_KEY` |
-| Java 测试失败 | 安装 Java 17: `sudo apt install openjdk-17-jdk` |
-| 扩展编译失败 | `cd extension && npm install && npx tsc` |
-| Docker 启动失败 | `docker-compose logs -f` 查看日志 |
-| 端口 8000 被占用 | 修改 `server.py` 或 `docker-compose.yml` 中的端口 |
-```
+|------|----------|
+| 端口 8000 被占用 | 将 `-p 8000:8000` 改为 `-p 8001:8000`，访问 `http://localhost:8001/docs` |
+| 容器启动后立即退出 | 执行 `docker logs agent` 查看错误，通常为 API Key 未配置或无效 |
+| Docker Hub 拉取超时 | 使用离线导入方式（场景一步骤1中的方式二） |
+| 拉取速度慢 | 配置 Docker 镜像加速器（华为云、阿里云等） |
+
+## 华为云部署
+
+本项目已成功部署至华为云 ECS（Ubuntu 22.04），配置了 systemd 服务实现持久化运行。
+
+**公网访问地址**：`http://120.46.94.151:8000`
+
+**部署架构**：
+- 华为云 ECS（2核4GB）
+- Python 3.10 + 虚拟环境
+- FastAPI + Uvicorn 服务
+- systemd 服务守护（开机自启 + 异常重启）
+
+**验证方式**：浏览器访问 `http://120.46.94.151:8000/docs`
