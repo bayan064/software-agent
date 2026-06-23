@@ -11,6 +11,16 @@ package "交互接口层" {
   }
 }
 
+package "IDE集成层" {
+  class VSCodeExtension {
+    +activate()
+    +generateCode()
+    +快捷键触发(Ctrl+Alt+G)
+    +右键菜单入口()
+    +配置后端地址()
+  }
+}
+
 package "业务流核心层" {
   class AgentWorkflow {
     +StateGraph workflow
@@ -53,6 +63,7 @@ package "模型与工具层" {
 ' 依赖关系映射
 CLI --> AgentWorkflow : 触发
 APIServer --> AgentWorkflow : 触发
+VSCodeExtension --> APIServer : HTTP调用
 
 AgentWorkflow *--> AgentState : 状态管理
 AgentWorkflow *--> GraphNodes : 流程节点绑定

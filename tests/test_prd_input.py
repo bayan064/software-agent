@@ -40,7 +40,7 @@ def test_run_prd_text_invokes_agent(tmp_path, monkeypatch):
 
 def test_run_prd_file_invokes_agent_with_txt(monkeypatch, tmp_path):
     base_dir = os.path.dirname(os.path.dirname(__file__))
-    prd_file = os.path.join(base_dir, "tests", "prds", "test.txt")
+    prd_file = os.path.join(base_dir, "tests", "prds", "test2.txt")
     calls = {}
 
     with open(prd_file, "r", encoding="utf-8") as f:
